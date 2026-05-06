@@ -262,12 +262,11 @@ export abstract class BasePage {
 
         if (typeof selectorOrLocator === 'string') {
             if (this.autoHealer) {
-                await this.autoHealer.fill(selectorOrLocator, value, options);
-                return;
+                await this.withSecurityCheck(() => this.autoHealer!.fill(selectorOrLocator, value, options));
             } else {
-                await this.page.fill(selectorOrLocator, value, options);
-                return;
+                await this.withSecurityCheck(() => this.page.fill(selectorOrLocator, value, options));
             }
+            return;
         }
 
         const timeout = options?.timeout ?? config.test.timeouts.default;
