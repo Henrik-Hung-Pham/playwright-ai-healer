@@ -62,14 +62,14 @@ describe('LocatorManager', () => {
         });
 
         it('should return selector for valid nested key', async () => {
-            const mockLocators = { gigantti: { searchInput: '#search-box' } };
+            const mockLocators = { booksToScrape: { searchInput: '#search-box' } };
             const { LocatorManager, mockedFs } = await getLocatorManager();
             vi.mocked(mockedFs.existsSync).mockReturnValue(true);
             vi.mocked(mockedFs.readFileSync).mockReturnValue(JSON.stringify(mockLocators));
 
             const manager = LocatorManager.getInstance();
 
-            expect(manager.getLocator('gigantti.searchInput')).toBe('#search-box');
+            expect(manager.getLocator('booksToScrape.searchInput')).toBe('#search-box');
         });
 
         it('should return null for non-existent key', async () => {
@@ -98,7 +98,7 @@ describe('LocatorManager', () => {
 
     describe('updateLocator', () => {
         it('should update locator and save to file', async () => {
-            const mockLocators = { gigantti: { searchInput: '#old-selector' } };
+            const mockLocators = { booksToScrape: { searchInput: '#old-selector' } };
             const { LocatorManager, mockedFs } = await getLocatorManager();
             vi.mocked(mockedFs.existsSync).mockReturnValue(true);
             vi.mocked(mockedFs.readFileSync).mockReturnValue(JSON.stringify(mockLocators));
@@ -106,11 +106,11 @@ describe('LocatorManager', () => {
 
             const manager = LocatorManager.getInstance();
 
-            await manager.updateLocator('gigantti.searchInput', '#new-selector');
+            await manager.updateLocator('booksToScrape.searchInput', '#new-selector');
 
             expect(mockedFs.writeFileSync).toHaveBeenCalled();
             // Verify the new value is accessible
-            expect(manager.getLocator('gigantti.searchInput')).toBe('#new-selector');
+            expect(manager.getLocator('booksToScrape.searchInput')).toBe('#new-selector');
         });
 
         it('should create nested path if it does not exist', async () => {
@@ -134,10 +134,10 @@ describe('LocatorManager', () => {
             vi.mocked(mockedFs.existsSync).mockReturnValue(false);
 
             const manager = LocatorManager.getInstance();
-            await manager.recordSelectorFailure('gigantti.searchInput');
+            await manager.recordSelectorFailure('booksToScrape.searchInput');
 
             // No metrics entry should have been created
-            expect(manager.getMetrics('gigantti.searchInput')).toEqual({ failureCount: 0 });
+            expect(manager.getMetrics('booksToScrape.searchInput')).toEqual({ failureCount: 0 });
             expect(mockedFs.writeFileSync).not.toHaveBeenCalled();
         });
 
@@ -147,9 +147,9 @@ describe('LocatorManager', () => {
             vi.mocked(mockedFs.writeFileSync).mockImplementation(() => {});
 
             const manager = LocatorManager.getInstance();
-            await manager.recordSelectorHealed('gigantti.searchInput');
+            await manager.recordSelectorHealed('booksToScrape.searchInput');
 
-            const metrics = manager.getMetrics('gigantti.searchInput');
+            const metrics = manager.getMetrics('booksToScrape.searchInput');
             expect(metrics.failureCount).toBe(0);
             expect(metrics.healedAt).toBeDefined();
             expect(typeof metrics.healedAt).toBe('string');
@@ -163,10 +163,10 @@ describe('LocatorManager', () => {
 
             const manager = LocatorManager.getInstance();
             // Heal first so the guard passes
-            await manager.recordSelectorHealed('gigantti.searchInput');
-            await manager.recordSelectorFailure('gigantti.searchInput');
+            await manager.recordSelectorHealed('booksToScrape.searchInput');
+            await manager.recordSelectorFailure('booksToScrape.searchInput');
 
-            const metrics = manager.getMetrics('gigantti.searchInput');
+            const metrics = manager.getMetrics('booksToScrape.searchInput');
             expect(metrics.failureCount).toBe(1);
             expect(metrics.lastFailedAt).toBeDefined();
         });
@@ -177,13 +177,13 @@ describe('LocatorManager', () => {
             vi.mocked(mockedFs.writeFileSync).mockImplementation(() => {});
 
             const manager = LocatorManager.getInstance();
-            await manager.recordSelectorHealed('gigantti.searchInput');
-            await manager.recordSelectorFailure('gigantti.searchInput');
-            await manager.recordSelectorFailure('gigantti.searchInput');
+            await manager.recordSelectorHealed('booksToScrape.searchInput');
+            await manager.recordSelectorFailure('booksToScrape.searchInput');
+            await manager.recordSelectorFailure('booksToScrape.searchInput');
             // Heal again — failureCount should reset to 0
-            await manager.recordSelectorHealed('gigantti.searchInput');
+            await manager.recordSelectorHealed('booksToScrape.searchInput');
 
-            expect(manager.getMetrics('gigantti.searchInput').failureCount).toBe(0);
+            expect(manager.getMetrics('booksToScrape.searchInput').failureCount).toBe(0);
         });
 
         it('getMetrics() returns shallow copy of all entries', async () => {

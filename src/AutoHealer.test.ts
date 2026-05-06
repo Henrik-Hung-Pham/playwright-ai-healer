@@ -102,7 +102,7 @@ describe('AutoHealer', () => {
             expect(mockGeminiGenerateContent).toHaveBeenCalled();
         });
 
-        it('should re-throw error when healing returns FAIL', async () => {
+        it('should skip test when healing returns FAIL (no replacement selector found)', async () => {
             (mockPage.click as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('Element not found'));
             mockGeminiGenerateContent.mockResolvedValue({
                 response: { text: () => 'FAIL' },
@@ -110,7 +110,15 @@ describe('AutoHealer', () => {
 
             const healer = new AutoHealer(mockPage as Page, 'test-key', 'gemini', undefined, true);
 
+            // Skip is unconditional when the AI cannot return a usable selector,
+            // independent of config.ai.healing.failureMode.
             await healer.click('#nonexistent');
+
+            const { test } = await import('@playwright/test');
+            expect(test.skip).toHaveBeenCalledWith(
+                true,
+                expect.stringContaining('could not find a suitable replacement selector')
+            );
         });
 
         it('should clean markdown code blocks from AI response', async () => {
@@ -340,7 +348,10 @@ describe('AutoHealer', () => {
             await healer.click('#broken');
 
             const { test } = await import('@playwright/test');
-            expect(test.skip).toHaveBeenCalledWith(true, expect.stringContaining('Client Error (4xx)'));
+            expect(test.skip).toHaveBeenCalledWith(
+                true,
+                expect.stringContaining('could not find a suitable replacement selector')
+            );
 
             // Restore config
             config.ai.openai.apiKeys = originalOpenAiKeys;
@@ -379,6 +390,325 @@ describe('AutoHealer', () => {
         });
     });
 
+    describe('hover()', () => {
+        it('should hover successfully without healing when element is found', async () => {
+            (mockPage.hover as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+
+            const healer = new AutoHealer(mockPage as Page, 'test-key', 'gemini', undefined, true);
+            await healer.hover('#existing-button');
+
+            expect(mockPage.hover).toHaveBeenCalledTimes(1);
+            expect(mockPage.hover).toHaveBeenCalledWith('#existing-button', expect.any(Object));
+        });
+
+        it('should attempt healing and retry when hover fails', async () => {
+            (mockPage.hover as ReturnType<typeof vi.fn>)
+                .mockRejectedValueOnce(new Error('TimeoutError'))
+                .mockResolvedValueOnce(undefined);
+
+            const healer = new AutoHealer(mockPage as Page, 'test-key', 'gemini', undefined, true);
+            await healer.hover('#broken-selector');
+
+            expect(mockPage.hover).toHaveBeenCalledTimes(2);
+            expect(mockGeminiGenerateContent).toHaveBeenCalled();
+        });
+    });
+
+    describe('type()', () => {
+        it('should type successfully without healing when element is found', async () => {
+            const healer = new AutoHealer(mockPage as Page, 'test-key', 'gemini', undefined, true);
+            await healer.type('#input-field', 'hello');
+
+            const locatorMock = mockPage.locator as ReturnType<typeof vi.fn>;
+            expect(locatorMock).toHaveBeenCalledWith('#input-field');
+        });
+
+        it('should pass delay option to pressSequentially', async () => {
+            const healer = new AutoHealer(mockPage as Page, 'test-key', 'gemini', undefined, true);
+            await healer.type('#input-field', 'hello', { delay: 100 });
+
+            const locatorMock = mockPage.locator as ReturnType<typeof vi.fn>;
+            const locatorHandle = locatorMock.mock.results[0]?.value as { pressSequentially: ReturnType<typeof vi.fn> };
+            expect(locatorHandle.pressSequentially).toHaveBeenCalledWith(
+                'hello',
+                expect.objectContaining({ delay: 100 })
+            );
+        });
+
+        it('should attempt healing and retry when type fails', async () => {
+            const pressSequentiallyMock = vi
+                .fn()
+                .mockRejectedValueOnce(new Error('TimeoutError'))
+                .mockResolvedValueOnce(undefined);
+
+            const mockLocatorHandle = {
+                waitFor: vi.fn().mockResolvedValue(undefined),
+                pressSequentially: pressSequentiallyMock,
+                count: vi.fn().mockResolvedValue(1),
+            };
+            (mockPage.locator as ReturnType<typeof vi.fn>).mockReturnValue(mockLocatorHandle);
+
+            const healer = new AutoHealer(mockPage as Page, 'test-key', 'gemini', undefined, true);
+            await healer.type('#broken', 'hello');
+
+            expect(mockGeminiGenerateContent).toHaveBeenCalled();
+        });
+    });
+
+    describe('selectOption()', () => {
+        it('should select option successfully without healing', async () => {
+            (mockPage.selectOption as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+
+            const healer = new AutoHealer(mockPage as Page, 'test-key', 'gemini', undefined, true);
+            await healer.selectOption('#dropdown', 'option1');
+
+            expect(mockPage.selectOption).toHaveBeenCalledTimes(1);
+            expect(mockPage.selectOption).toHaveBeenCalledWith('#dropdown', 'option1', expect.any(Object));
+        });
+
+        it('should attempt healing and retry when selectOption fails', async () => {
+            (mockPage.selectOption as ReturnType<typeof vi.fn>)
+                .mockRejectedValueOnce(new Error('TimeoutError'))
+                .mockResolvedValueOnce(undefined);
+
+            const healer = new AutoHealer(mockPage as Page, 'test-key', 'gemini', undefined, true);
+            await healer.selectOption('#broken-dropdown', 'option1');
+
+            expect(mockPage.selectOption).toHaveBeenCalledTimes(2);
+            expect(mockGeminiGenerateContent).toHaveBeenCalled();
+        });
+    });
+
+    describe('check()', () => {
+        it('should check successfully without healing', async () => {
+            (mockPage.check as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+
+            const healer = new AutoHealer(mockPage as Page, 'test-key', 'gemini', undefined, true);
+            await healer.check('#checkbox');
+
+            expect(mockPage.check).toHaveBeenCalledTimes(1);
+            expect(mockPage.check).toHaveBeenCalledWith('#checkbox', expect.any(Object));
+        });
+
+        it('should attempt healing and retry when check fails', async () => {
+            (mockPage.check as ReturnType<typeof vi.fn>)
+                .mockRejectedValueOnce(new Error('TimeoutError'))
+                .mockResolvedValueOnce(undefined);
+
+            const healer = new AutoHealer(mockPage as Page, 'test-key', 'gemini', undefined, true);
+            await healer.check('#broken-checkbox');
+
+            expect(mockPage.check).toHaveBeenCalledTimes(2);
+            expect(mockGeminiGenerateContent).toHaveBeenCalled();
+        });
+    });
+
+    describe('uncheck()', () => {
+        it('should uncheck successfully without healing', async () => {
+            (mockPage.uncheck as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+
+            const healer = new AutoHealer(mockPage as Page, 'test-key', 'gemini', undefined, true);
+            await healer.uncheck('#checkbox');
+
+            expect(mockPage.uncheck).toHaveBeenCalledTimes(1);
+            expect(mockPage.uncheck).toHaveBeenCalledWith('#checkbox', expect.any(Object));
+        });
+
+        it('should attempt healing and retry when uncheck fails', async () => {
+            (mockPage.uncheck as ReturnType<typeof vi.fn>)
+                .mockRejectedValueOnce(new Error('TimeoutError'))
+                .mockResolvedValueOnce(undefined);
+
+            const healer = new AutoHealer(mockPage as Page, 'test-key', 'gemini', undefined, true);
+            await healer.uncheck('#broken-checkbox');
+
+            expect(mockPage.uncheck).toHaveBeenCalledTimes(2);
+            expect(mockGeminiGenerateContent).toHaveBeenCalled();
+        });
+    });
+
+    describe('waitForSelector()', () => {
+        it('should wait for selector successfully without healing', async () => {
+            (mockPage.waitForSelector as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+
+            const healer = new AutoHealer(mockPage as Page, 'test-key', 'gemini', undefined, true);
+            await healer.waitForSelector('#element');
+
+            expect(mockPage.waitForSelector).toHaveBeenCalledTimes(1);
+            expect(mockPage.waitForSelector).toHaveBeenCalledWith('#element', expect.any(Object));
+        });
+
+        it('should attempt healing and retry when waitForSelector fails', async () => {
+            (mockPage.waitForSelector as ReturnType<typeof vi.fn>)
+                .mockRejectedValueOnce(new Error('TimeoutError'))
+                .mockResolvedValueOnce(undefined);
+
+            const healer = new AutoHealer(mockPage as Page, 'test-key', 'gemini', undefined, true);
+            await healer.waitForSelector('#broken-selector');
+
+            expect(mockPage.waitForSelector).toHaveBeenCalledTimes(2);
+            expect(mockGeminiGenerateContent).toHaveBeenCalled();
+        });
+    });
+
+    describe('getHealingEvents()', () => {
+        it('should return empty array initially', () => {
+            const healer = new AutoHealer(mockPage as Page, 'test-key', 'gemini');
+            expect(healer.getHealingEvents()).toEqual([]);
+        });
+
+        it('should return healing events after a healing attempt', async () => {
+            (mockPage.click as ReturnType<typeof vi.fn>)
+                .mockRejectedValueOnce(new Error('TimeoutError'))
+                .mockResolvedValueOnce(undefined);
+
+            const healer = new AutoHealer(mockPage as Page, 'test-key', 'gemini');
+            await healer.click('#broken');
+
+            const events = healer.getHealingEvents();
+            expect(events.length).toBe(1);
+            expect(events[0]!.originalSelector).toBe('#broken');
+            expect(events[0]!.success).toBe(true);
+        });
+    });
+
+    describe('healAll()', () => {
+        it('should return success for all operations when none fail', async () => {
+            (mockPage.click as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+            (mockPage.fill as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+
+            const healer = new AutoHealer(mockPage as Page, 'test-key', 'gemini');
+            const results = await healer.healAll([
+                { selectorOrKey: '#btn1', action: 'click' },
+                { selectorOrKey: '#input1', action: 'fill', value: 'test' },
+            ]);
+
+            expect(results).toHaveLength(2);
+            expect(results[0]!.success).toBe(true);
+            expect(results[1]!.success).toBe(true);
+        });
+
+        it('should heal failed operations and retry them', async () => {
+            (mockPage.click as ReturnType<typeof vi.fn>)
+                .mockRejectedValueOnce(new Error('Element not found'))
+                .mockResolvedValueOnce(undefined);
+
+            const healer = new AutoHealer(mockPage as Page, 'test-key', 'gemini');
+            const results = await healer.healAll([{ selectorOrKey: '#broken-btn', action: 'click' }]);
+
+            expect(results).toHaveLength(1);
+            expect(results[0]!.success).toBe(true);
+            expect(results[0]!.healedSelector).toBe('#healed-selector');
+        });
+
+        it('should report failure when healing returns null', async () => {
+            (mockPage.click as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('Element not found'));
+            mockGeminiGenerateContent.mockResolvedValue({
+                response: { text: () => 'FAIL' },
+            });
+
+            const healer = new AutoHealer(mockPage as Page, 'test-key', 'gemini');
+            const results = await healer.healAll([{ selectorOrKey: '#broken-btn', action: 'click' }]);
+
+            expect(results).toHaveLength(1);
+            expect(results[0]!.success).toBe(false);
+            expect(results[0]!.error).toBe('AI could not find a replacement selector');
+        });
+
+        it('should report failure when retry with healed selector also fails', async () => {
+            (mockPage.click as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('Element not found'));
+
+            const healer = new AutoHealer(mockPage as Page, 'test-key', 'gemini');
+            const results = await healer.healAll([{ selectorOrKey: '#broken-btn', action: 'click' }]);
+
+            expect(results).toHaveLength(1);
+            expect(results[0]!.success).toBe(false);
+            expect(results[0]!.healedSelector).toBe('#healed-selector');
+            expect(results[0]!.error).toBeDefined();
+        });
+
+        it('should update locator when healing succeeds with a locator key', async () => {
+            (mockPage.click as ReturnType<typeof vi.fn>)
+                .mockRejectedValueOnce(new Error('Element not found'))
+                .mockResolvedValueOnce(undefined);
+
+            const healer = new AutoHealer(mockPage as Page, 'test-key', 'gemini');
+            await healer.healAll([{ selectorOrKey: 'app.btn', action: 'click' }]);
+
+            expect(mockLocatorManager.updateLocator).toHaveBeenCalledWith('app.btn', '#healed-selector');
+            expect(mockLocatorManager.recordSelectorHealed).toHaveBeenCalledWith('app.btn');
+        });
+
+        it('should handle hover action in runOperation', async () => {
+            (mockPage.hover as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+
+            const healer = new AutoHealer(mockPage as Page, 'test-key', 'gemini');
+            const results = await healer.healAll([{ selectorOrKey: '#link', action: 'hover' }]);
+
+            expect(results[0]!.success).toBe(true);
+            expect(mockPage.hover).toHaveBeenCalled();
+        });
+
+        it('should handle type action in runOperation', async () => {
+            const healer = new AutoHealer(mockPage as Page, 'test-key', 'gemini');
+            const results = await healer.healAll([{ selectorOrKey: '#input', action: 'type', value: 'text' }]);
+
+            expect(results[0]!.success).toBe(true);
+        });
+
+        it('should handle check action in runOperation', async () => {
+            (mockPage.check as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+
+            const healer = new AutoHealer(mockPage as Page, 'test-key', 'gemini');
+            const results = await healer.healAll([{ selectorOrKey: '#chk', action: 'check' }]);
+
+            expect(results[0]!.success).toBe(true);
+            expect(mockPage.check).toHaveBeenCalled();
+        });
+
+        it('should handle uncheck action in runOperation', async () => {
+            (mockPage.uncheck as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+
+            const healer = new AutoHealer(mockPage as Page, 'test-key', 'gemini');
+            const results = await healer.healAll([{ selectorOrKey: '#chk', action: 'uncheck' }]);
+
+            expect(results[0]!.success).toBe(true);
+            expect(mockPage.uncheck).toHaveBeenCalled();
+        });
+
+        it('should handle waitForSelector action in runOperation', async () => {
+            (mockPage.waitForSelector as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+
+            const healer = new AutoHealer(mockPage as Page, 'test-key', 'gemini');
+            const results = await healer.healAll([{ selectorOrKey: '#el', action: 'waitForSelector' }]);
+
+            expect(results[0]!.success).toBe(true);
+            expect(mockPage.waitForSelector).toHaveBeenCalled();
+        });
+
+        it('should handle fill action in runOperation', async () => {
+            (mockPage.fill as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+
+            const healer = new AutoHealer(mockPage as Page, 'test-key', 'gemini');
+            const results = await healer.healAll([{ selectorOrKey: '#input', action: 'fill', value: 'hello' }]);
+
+            expect(results[0]!.success).toBe(true);
+            expect(mockPage.fill).toHaveBeenCalledWith('#input', 'hello', expect.any(Object));
+        });
+
+        it('should record selector failure for operations with locator keys', async () => {
+            (mockPage.click as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('Element not found'));
+            mockGeminiGenerateContent.mockResolvedValue({
+                response: { text: () => 'FAIL' },
+            });
+
+            const healer = new AutoHealer(mockPage as Page, 'test-key', 'gemini');
+            await healer.healAll([{ selectorOrKey: 'app.btn', action: 'click' }]);
+
+            expect(mockLocatorManager.recordSelectorFailure).toHaveBeenCalledWith('app.btn');
+        });
+    });
+
     describe('Confidence Threshold', () => {
         it('should skip test when healed selector matches 0 DOM elements', async () => {
             // First click fails, triggering healing
@@ -399,9 +729,11 @@ describe('AutoHealer', () => {
             (mockPage.locator as ReturnType<typeof vi.fn>).mockReturnValue(mockLocatorHandle);
 
             const healer = new AutoHealer(mockPage as Page, 'test-key', 'gemini', undefined, true);
+
             await healer.click('#broken-selector');
 
             // heal() should reject the selector and executeAction should skip the test
+            // unconditionally when no usable replacement selector is found.
             const { test } = await import('@playwright/test');
             expect(test.skip).toHaveBeenCalledWith(
                 true,
@@ -668,6 +1000,7 @@ describe('AutoHealer', () => {
                 const healerInstance = new AutoHealer(mockPage as Page, 'test-key', 'gemini', undefined, true);
 
                 // heal() returns null for invalid selectors; executeAction then calls test.skip()
+                // unconditionally when no usable replacement is found.
                 await healerInstance.click('#any-selector');
 
                 const { test } = await import('@playwright/test');

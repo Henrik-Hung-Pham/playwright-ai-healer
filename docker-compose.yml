@@ -17,7 +17,7 @@ services:
       - OPENAI_API_KEYS=${OPENAI_API_KEYS}
       - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.0-flash}
       - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4o}
-      - BASE_URL=${BASE_URL:-https://www.gigantti.fi/}
+      - BASE_URL=${BASE_URL:-https://books.toscrape.com/}
       - TEST_ENV=${TEST_ENV:-prod}
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - HEADLESS=${HEADLESS:-true}

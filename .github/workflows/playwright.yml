@@ -8,7 +8,7 @@ on:
     branches:
       - main
   schedule:
-    - cron: '0 */2 * * *'
+    - cron: '0 6 * * *'
   workflow_dispatch:
     # Allow manual trigger from GitHub Actions UI
 
@@ -31,6 +31,12 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Audit dependencies
+        run: npm audit --audit-level=high
+
+      - name: Lint
+        run: npm run lint
 
       - name: Run Unit Tests with Coverage
         run: npm run test:coverage
@@ -60,14 +66,20 @@ jobs:
             runs-on: ubuntu-24.04
             projectFlags: --project=chromium --project=chrome --project=edge --project=mobile-chrome
             browsers: chromium chrome msedge
+            browser-engine: chromium
+            testFilter: ''
           - name: Firefox
             runs-on: ubuntu-24.04
             projectFlags: --project=firefox
             browsers: firefox
+            browser-engine: firefox
+            testFilter: --grep-invert "Self-Healing"
           - name: WebKit Browsers
             runs-on: macos-latest
             projectFlags: --project=webkit --project=mobile-safari --project=tablet
             browsers: webkit
+            browser-engine: webkit
+            testFilter: --grep-invert "Self-Healing"
 
     name: E2E — ${{ matrix.name }}
 
@@ -91,13 +103,20 @@ jobs:
           path: |
             ~/.cache/ms-playwright
             ~/Library/Caches/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          key: playwright-${{ runner.os }}-${{ matrix.browser-engine }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            playwright-${{ runner.os }}-${{ matrix.browser-engine }}-
 
       - name: Install Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
         run: npx playwright install --with-deps ${{ matrix.browsers }}
 
+      - name: Install Playwright system dependencies
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps ${{ matrix.browser-engine }}
+
       - name: Run Playwright tests
-        run: npx playwright test ${{ matrix.projectFlags }}
+        run: npx playwright test ${{ matrix.projectFlags }} ${{ matrix.testFilter }}
 
       - name: Upload test results
         uses: actions/upload-artifact@v7

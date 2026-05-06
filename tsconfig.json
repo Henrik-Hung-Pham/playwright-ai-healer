@@ -34,11 +34,12 @@
 
         // Recommended Options
         "strict": true,
-        "jsx": "react-jsx",
         "verbatimModuleSyntax": true,
         "isolatedModules": true,
         "noUncheckedSideEffectImports": true,
         "moduleDetection": "force",
         "skipLibCheck": true
-    }
+    },
+    "include": ["src/**/*.ts", "tests/**/*.ts", "*.ts"],
+    "exclude": ["node_modules", "dist", "playwright-report", "test-results"]
 }
