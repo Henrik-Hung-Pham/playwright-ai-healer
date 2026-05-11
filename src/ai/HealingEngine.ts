@@ -80,8 +80,12 @@ export class HealingEngine {
             `[HealingEngine:heal] 🔑 Available API keys: ${this.clientManager.getKeyCount()}, Current key index: ${this.clientManager.getCurrentKeyIndex()}`
         );
 
-        // 1. Capture simplified DOM
-        logger.info(`[HealingEngine:heal] 📸 Step 1: Capturing simplified DOM...`);
+        // 1. Capture simplified DOM — ONCE, before the retry loop.
+        // The DOM state is static within a single heal() call (the page hasn't
+        // navigated or been mutated between retries), so we cache the snapshot
+        // and reuse it across all retry / key-rotation / provider-failover attempts.
+        // This avoids redundant page.evaluate() calls on each retry.
+        logger.info(`[HealingEngine:heal] 📸 Step 1: Capturing simplified DOM (cached for all retries)...`);
         const rawSnapshot = await getSimplifiedDOM(page);
         const htmlSnapshot = rawSnapshot.substring(0, config.ai.healing.domSnapshotCharLimit);
         logger.info(
