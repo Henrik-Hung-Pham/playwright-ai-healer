@@ -70,12 +70,12 @@ describe('FileAdapter', () => {
             vi.mocked(fs.existsSync).mockReturnValue(true);
             vi.mocked(fs.readFileSync).mockReturnValue(
                 JSON.stringify({
-                    gigantti: { searchInput: '#search-box' },
+                    booksToScrape: { searchInput: '#search-box' },
                 })
             );
 
             const adapter = new FileAdapter('/fake/path/locators.json');
-            expect(adapter.getLocator('gigantti.searchInput')).toBe('#search-box');
+            expect(adapter.getLocator('booksToScrape.searchInput')).toBe('#search-box');
         });
 
         it('should return null for non-existent key', () => {
@@ -114,12 +114,12 @@ describe('FileAdapter', () => {
     describe('updateLocator()', () => {
         it('should update existing nested key', async () => {
             vi.mocked(fs.existsSync).mockReturnValue(true);
-            vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({ gigantti: { searchInput: '#old' } }));
+            vi.mocked(fs.readFileSync).mockReturnValue(JSON.stringify({ booksToScrape: { searchInput: '#old' } }));
             const releaseMock = vi.fn().mockResolvedValue(undefined);
             vi.mocked(lockfile.lock).mockResolvedValue(releaseMock);
 
             const adapter = new FileAdapter('/fake/path/locators.json');
-            await adapter.updateLocator('gigantti.searchInput', '#new-selector');
+            await adapter.updateLocator('booksToScrape.searchInput', '#new-selector');
 
             expect(fs.writeFileSync).toHaveBeenCalled();
             expect(releaseMock).toHaveBeenCalled();
@@ -171,7 +171,7 @@ describe('FileAdapter', () => {
             vi.mocked(fs.existsSync).mockReturnValue(true);
             vi.mocked(fs.readFileSync).mockReturnValue(
                 JSON.stringify({
-                    gigantti: { searchInput: '#search', btn: '#btn' },
+                    booksToScrape: { searchInput: '#search', btn: '#btn' },
                     other: '#other',
                 })
             );
@@ -180,8 +180,8 @@ describe('FileAdapter', () => {
             const all = adapter.getAllLocators();
 
             expect(all).toEqual({
-                'gigantti.searchInput': '#search',
-                'gigantti.btn': '#btn',
+                'booksToScrape.searchInput': '#search',
+                'booksToScrape.btn': '#btn',
                 other: '#other',
             });
         });

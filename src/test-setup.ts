@@ -13,7 +13,7 @@ export const mockOpenaiCreate = vi.fn();
 vi.mock('./config/index.js', () => ({
     config: {
         env: 'dev',
-        app: { baseUrl: 'https://www.gigantti.fi/' },
+        app: { baseUrl: 'https://books.toscrape.com/' },
         ai: {
             provider: 'gemini',
             gemini: { apiKey: 'mock-gemini-key', modelName: 'gemini-flash-latest' },
@@ -22,7 +22,13 @@ vi.mock('./config/index.js', () => ({
                 modelName: 'gpt-4o',
                 apiKey: undefined,
             },
-            healing: { maxRetries: 3, retryDelay: 5000, confidenceThreshold: 0.7, domSnapshotCharLimit: 2000 },
+            healing: {
+                maxRetries: 3,
+                retryDelay: 5000,
+                confidenceThreshold: 0.7,
+                domSnapshotCharLimit: 2000,
+                failureMode: 'fail' as 'fail' | 'skip',
+            },
             security: { vercelChallengePath: '.well-known/vercel/security/request-challenge' },
             prompts: {
                 healingPrompt: (selector: string, error: string, html: string) =>
@@ -43,13 +49,13 @@ vi.mock('./config/index.js', () => ({
                 stabilization: 200,
             },
         },
-        logging: { level: 'info', consoleLevel: 'info' },
+        logging: { level: 'info', consoleLevel: 'info', emoji: true },
         testData: {
-            searchTerms: ['kannettava', 'puhelin'],
+            searchTerms: ['fiction', 'mystery', 'romance', 'poetry', 'travel'],
             getRandomSearchTerm() {
-                return 'kannettava';
+                return 'fiction';
             },
-            categories: { computers: 'Tietotekniikka' },
+            categories: { travel: { label: 'Travel' }, mystery: { label: 'Mystery' } },
         },
     },
     resetConfigForTesting: vi.fn(),
@@ -98,6 +104,7 @@ vi.mock('@playwright/test', () => ({
         toHaveValue: vi.fn(),
         toBeVisible: vi.fn(),
         toContainText: vi.fn(),
+        toBeGreaterThan: vi.fn(),
         not: {
             toBeVisible: vi.fn(),
         },

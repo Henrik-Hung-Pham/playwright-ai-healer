@@ -1,23 +1,23 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Page, Locator } from '@playwright/test';
-import { GiganttiHomePage } from './GiganttiHomePage.js';
-import { CategoryPage } from './CategoryPage.js';
-import { ProductDetailPage } from './ProductDetailPage.js';
+import { BooksHomePage } from './BooksHomePage.js';
+import { BookDetailPage } from './BookDetailPage.js';
 import { AutoHealer } from '../AutoHealer.js';
-import { config } from '../config/index.js';
 import type { SiteHandler } from '../utils/SiteHandler.js';
 
 // Mock dependencies
 vi.mock('../config/locators.json', () => ({
     default: {
-        gigantti: {
-            searchInput: '#search',
-            searchButton: '[data-testid="search-button"]',
-            navLink: 'nav a:has-text("{}")',
-            productCard: '.product',
-            categoryTile: '.category-tile',
-            productTitle: ['.title'],
-            productPrice: ['.price'],
+        booksToScrape: {
+            categoryLink: '.side_categories a',
+            bookCard: 'article.product_pod',
+            bookTitle: 'article.product_pod h3 a',
+            bookPrice: '.price_color',
+            addToCartButton: '.btn-primary',
+            nextPageButton: '.pager .next a',
+            bookDetailTitle: '.product_main h1',
+            bookDetailPrice: '.product_main .price_color',
+            breadcrumb: '.breadcrumb li',
         },
     },
 }));
@@ -35,6 +35,7 @@ vi.mock('../utils/Logger.js', () => ({
 describe('Page Objects', () => {
     let mockPage: Partial<Page>;
     let mockAutoHealer: Partial<AutoHealer>;
+    let mockSiteHandler: SiteHandler;
     let mockLocator: Partial<Locator>;
 
     beforeEach(() => {
@@ -42,19 +43,24 @@ describe('Page Objects', () => {
             fill: vi.fn(),
             click: vi.fn(),
             first: vi.fn().mockReturnThis(),
+            nth: vi.fn().mockReturnThis(),
             isVisible: vi.fn().mockResolvedValue(true),
             waitFor: vi.fn(),
             focus: vi.fn().mockResolvedValue(undefined),
             clear: vi.fn().mockResolvedValue(undefined),
+            count: vi.fn().mockResolvedValue(5),
+            filter: vi.fn().mockReturnThis(),
+            locator: vi.fn().mockReturnThis(),
+            textContent: vi.fn().mockResolvedValue('Test Text'),
         };
 
         mockPage = {
             goto: vi.fn(),
+            click: vi.fn(),
             locator: vi.fn().mockReturnValue(mockLocator),
             getByRole: vi.fn().mockReturnValue(mockLocator),
             waitForLoadState: vi.fn().mockResolvedValue(undefined),
             waitForTimeout: vi.fn(),
-            waitForResponse: vi.fn().mockResolvedValue(undefined),
             on: vi.fn(),
         };
 
@@ -62,113 +68,81 @@ describe('Page Objects', () => {
             click: vi.fn(),
             fill: vi.fn(),
         };
+
+        mockSiteHandler = {
+            dismissOverlays: vi.fn().mockResolvedValue(undefined),
+        };
     });
 
-    describe('GiganttiHomePage', () => {
-        let homePage: GiganttiHomePage;
+    describe('BooksHomePage', () => {
+        let homePage: BooksHomePage;
 
         beforeEach(() => {
-            homePage = new GiganttiHomePage(mockPage as Page, mockAutoHealer as AutoHealer);
-            // Mock implicit site handler behavior from BasePage
-            Object.assign(homePage, {
-                siteHandler: { dismissOverlays: vi.fn().mockResolvedValue(undefined) } satisfies SiteHandler,
-            });
+            homePage = new BooksHomePage(mockPage as Page, mockAutoHealer as AutoHealer, mockSiteHandler);
         });
 
-        it('should open and navigate', async () => {
+        it('should open and navigate to books home page', async () => {
             await homePage.open();
             expect(mockPage.goto).toHaveBeenCalled();
         });
 
-        it('should search for a term', async () => {
-            const term = config.testData.searchTerms[0] || 'laptop';
-            await homePage.searchFor(term);
-            // Should fill search input
-            expect(mockPage.locator).toHaveBeenCalledWith('#search');
-            // Should click search button
-            expect(mockPage.locator).toHaveBeenCalledWith('[data-testid="search-button"]');
-        });
-
-        it('should navigate to category via link', async () => {
-            const category = 'Gaming'; // Keeping hardcoded here as it needs to match mock expectations or config needs update
-            await homePage.navigateToCategory(category);
-            expect(mockPage.locator).toHaveBeenCalledWith(expect.stringContaining(category));
+        it('should navigate to a category', async () => {
+            await homePage.navigateToCategory('Mystery');
+            expect(mockPage.locator).toHaveBeenCalledWith('.side_categories a');
             expect(mockLocator.click).toHaveBeenCalled();
         });
 
-        it('should fall back to getByRole if locator fails', async () => {
-            const category = 'Gaming';
-            // First locator fails isVisible check
-            const failLocator = { ...mockLocator, isVisible: vi.fn().mockResolvedValue(false) };
-            const successLocator = { ...mockLocator, isVisible: vi.fn().mockResolvedValue(true) };
-
-            mockPage.locator = vi.fn().mockReturnValue(failLocator);
-            mockPage.getByRole = vi.fn().mockReturnValue(successLocator);
-
-            await homePage.navigateToCategory(category);
-
-            expect(mockPage.getByRole).toHaveBeenCalledWith(
-                'link',
-                expect.objectContaining({ name: new RegExp(category, 'i') })
-            );
-            expect(successLocator.click).toHaveBeenCalled();
-        });
-    });
-
-    describe('CategoryPage', () => {
-        let categoryPage: CategoryPage;
-
-        beforeEach(() => {
-            categoryPage = new CategoryPage(mockPage as Page, mockAutoHealer as AutoHealer);
-            Object.assign(categoryPage, {
-                siteHandler: { dismissOverlays: vi.fn().mockResolvedValue(undefined) } satisfies SiteHandler,
-            });
+        it('should get book count', async () => {
+            const count = await homePage.getBookCount();
+            expect(mockPage.locator).toHaveBeenCalledWith('article.product_pod');
+            expect(count).toBe(5);
         });
 
-        it('should verify products displayed', async () => {
-            await categoryPage.verifyProductsDisplayed();
-            // Should wait for product card or category tile (combined selector)
-            expect(mockPage.locator).toHaveBeenCalledWith('.product,.category-tile');
+        it('should click a book and return BookDetailPage', async () => {
+            const detailPage = await homePage.clickBook(0);
+            expect(mockPage.locator).toHaveBeenCalledWith('article.product_pod h3 a');
+            expect(mockLocator.click).toHaveBeenCalled();
+            expect(detailPage).toBeInstanceOf(BookDetailPage);
+        });
+
+        it('should verify books are displayed', async () => {
+            await homePage.verifyBooksDisplayed();
+            expect(mockPage.locator).toHaveBeenCalledWith('article.product_pod');
             expect(mockLocator.waitFor).toHaveBeenCalledWith(expect.objectContaining({ state: 'visible' }));
         });
 
-        it('should click first product using AutoHealer', async () => {
-            await categoryPage.clickFirstProduct();
-            expect(mockAutoHealer.click).toHaveBeenCalledWith('.product', expect.any(Object));
+        it('should add book to cart from listing page', async () => {
+            await homePage.addToCart(0);
+            expect(mockPage.locator).toHaveBeenCalledWith('article.product_pod');
+            expect(mockLocator.locator).toHaveBeenCalledWith('.btn-primary');
+            expect(mockLocator.click).toHaveBeenCalledWith(expect.any(Object));
         });
     });
 
-    describe('ProductDetailPage', () => {
-        let detailPage: ProductDetailPage;
+    describe('BookDetailPage', () => {
+        let detailPage: BookDetailPage;
 
         beforeEach(() => {
-            detailPage = new ProductDetailPage(mockPage as Page, mockAutoHealer as AutoHealer);
-            Object.assign(detailPage, {
-                siteHandler: { dismissOverlays: vi.fn().mockResolvedValue(undefined) } satisfies SiteHandler,
-            });
+            detailPage = new BookDetailPage(mockPage as Page, mockAutoHealer as AutoHealer, mockSiteHandler);
         });
 
-        it('should verify product details loaded', async () => {
-            await detailPage.verifyProductDetailsLoaded();
-            // Check title
-            expect(mockPage.locator).toHaveBeenCalledWith('.title');
+        it('should get the book title', async () => {
+            const title = await detailPage.getTitle();
+            expect(mockPage.locator).toHaveBeenCalledWith('.product_main h1');
             expect(mockLocator.waitFor).toHaveBeenCalled();
-            // Check price
-            expect(mockPage.locator).toHaveBeenCalledWith('.price');
+            expect(title).toBe('Test Text');
         });
 
-        it('should handle missing price gracefully', async () => {
-            // Mock price waitFor to fail (second call)
-            // First call (title) should succeed
-            vi.mocked(mockLocator.waitFor!)
-                .mockResolvedValueOnce(undefined)
-                .mockRejectedValueOnce(new Error('Timeout'));
+        it('should get the book price', async () => {
+            const price = await detailPage.getPrice();
+            expect(mockPage.locator).toHaveBeenCalledWith('.product_main .price_color');
+            expect(price).toBe('Test Text');
+        });
 
-            await detailPage.verifyProductDetailsLoaded();
-
-            // Should verify that logger.warn was called
-            const { logger } = await import('../utils/Logger.js');
-            expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('Price element not immediately visible'));
+        it('should verify book is displayed', async () => {
+            await detailPage.verifyBookDisplayed();
+            expect(mockPage.locator).toHaveBeenCalledWith('.product_main h1');
+            expect(mockPage.locator).toHaveBeenCalledWith('.product_main .price_color');
         });
     });
 });

@@ -53,7 +53,7 @@ describe('BasePage', () => {
 
             // Simulate failed security challenge response
             const mockResponse = {
-                url: () => `https://www.gigantti.fi/${config.ai.security?.vercelChallengePath}`,
+                url: () => `https://books.toscrape.com/${config.ai.security?.vercelChallengePath}`,
                 status: () => 403,
             };
 

@@ -233,14 +233,14 @@ export interface SelectorMetrics {
 /**
  * Flat map of dot-path locator keys → their stability metrics.
  *
- * @example { "gigantti.searchInput": { failureCount: 2, lastFailedAt: "2026-03-02T…" } }
+ * @example { "booksToScrape.searchInput": { failureCount: 2, lastFailedAt: "2026-03-02T…" } }
  */
 export interface MetricsStore {
     [key: string]: SelectorMetrics;
 }
 
 /**
- * Recursive type for nested locator storage (e.g., { gigantti: { searchInput: "#id" } })
+ * Recursive type for nested locator storage (e.g., { booksToScrape: { searchInput: "#id" } })
  */
 export interface LocatorMap {
     [key: string]: string | LocatorMap;

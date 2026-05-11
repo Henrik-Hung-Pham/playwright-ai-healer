@@ -150,7 +150,7 @@ For every public method, derive tests across all equivalence classes:
 
 | Class | Description | Example |
 |-------|-------------|---------|
-| Happy path | Valid input → expected success | `getLocator('gigantti.searchInput')` returns selector string |
+| Happy path | Valid input → expected success | `getLocator('booksToScrape.searchInput')` returns selector string |
 | Invalid input | Wrong type/format → error | `getLocator('')` throws `Error: key not found` |
 | Empty / null | Missing required param | `updateLocator(undefined, ...)` throws |
 | Boundary | Min/max values | Single API key vs array of keys |
@@ -170,7 +170,7 @@ describe('AutoHealer', () => {
             mockLocatorManager.getLocator.mockResolvedValue('input[type="search"]');
 
             // Act
-            await healer.click('gigantti.searchInput');
+            await healer.click('booksToScrape.searchInput');
 
             // Assert
             expect(mockPage.locator).toHaveBeenCalledWith('input[type="search"]');
@@ -181,7 +181,7 @@ describe('AutoHealer', () => {
                 .mockRejectedValueOnce({ status: 401 })
                 .mockResolvedValueOnce({ response: { text: () => 'input[type="search"]' } });
 
-            await healer.click('gigantti.searchInput');
+            await healer.click('booksToScrape.searchInput');
 
             expect(mockGeminiGenerateContent).toHaveBeenCalledTimes(2);
         });

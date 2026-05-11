@@ -57,21 +57,20 @@ Test → BasePage.safeClick/safeFill
 
 ### Key Files
 
-| File                            | Role                                                                                                                                                                               |
-| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/AutoHealer.ts`             | Public healing API (`click`, `fill`, `hover`…) + `heal()` orchestration; records `HealingEvent[]`                                                                                  |
-| `src/ai/AIClientManager.ts`     | Owns AI client lifecycle (OpenAI/Gemini), API key rotation, provider failover, and raw `makeRequest()` with timeout                                                                |
-| `src/ai/DOMSerializer.ts`       | `getSimplifiedDOM(page)` — focused snapshot of interactive elements for the AI prompt                                                                                              |
-| `src/ai/ResponseParser.ts`      | `parseAIResponse()` — strips markdown fences, backticks, and quotes from raw AI output                                                                                             |
-| `src/config/index.ts`           | Centralized config validated with Zod; exports `config` object; loads `.env.{TEST_ENV}` via `Environment.ts`                                                                       |
-| `src/config/locators.json`      | Persistent selector store; updated at runtime by `LocatorManager` when healing succeeds                                                                                            |
-| `src/utils/LocatorManager.ts`   | Singleton; reads/writes `locators.json` with file locking (`proper-lockfile`); dot-path key access (e.g., `gigantti.searchInput`)                                                  |
-| `src/utils/SiteHandler.ts`      | Strategy pattern for site-specific overlay dismissal; `GiganttiHandler` handles cookie banners; `NoOpHandler` is a no-op                                                           |
-| `src/pages/BasePage.ts`         | Abstract base for all page objects; wraps interactions with overlay dismissal, `AutoHealer` delegation, and Vercel security challenge detection                                    |
-| `src/pages/GiganttiHomePage.ts` | Home page entry point; `searchFor()`, `navigateToCategory(string)`, and typed `selectCategory<K>(key, subcategoryKey?)` delegating to `CategoryMenuPage`                           |
-| `src/pages/CategoryMenuPage.ts` | Typed category navigation POM; `select<K extends CategoryKey>(key, subcategoryKey?)` resolves Finnish nav labels from config and navigates via XPath + scoped `getByRole` fallback |
-| `src/pages/CategoryPage.ts`     | Product listing / category landing page; `verifyProductsDisplayed()` accepts both product-card grids and subcategory tile pages; `clickFirstProduct()` returns `ProductDetailPage` |
-| `tests/fixtures/base.ts`        | Playwright fixtures providing `autoHealer` and `giganttiPage` to E2E tests                                                                                                         |
+| File                          | Role                                                                                                                                            |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/AutoHealer.ts`           | Public healing API (`click`, `fill`, `hover`…) + `heal()` orchestration; records `HealingEvent[]`                                               |
+| `src/ai/AIClientManager.ts`   | Owns AI client lifecycle (OpenAI/Gemini), API key rotation, provider failover, and raw `makeRequest()` with timeout                             |
+| `src/ai/DOMSerializer.ts`     | `getSimplifiedDOM(page)` — focused snapshot of interactive elements for the AI prompt                                                           |
+| `src/ai/ResponseParser.ts`    | `parseAIResponse()` — strips markdown fences, backticks, and quotes from raw AI output                                                          |
+| `src/config/index.ts`         | Centralized config validated with Zod; exports `config` object; loads `.env.{TEST_ENV}` via `Environment.ts`                                    |
+| `src/config/locators.json`    | Persistent selector store; updated at runtime by `LocatorManager` when healing succeeds                                                         |
+| `src/utils/LocatorManager.ts` | Singleton; reads/writes `locators.json` with file locking (`proper-lockfile`); dot-path key access (e.g., `booksToScrape.bookTitle`)            |
+| `src/utils/SiteHandler.ts`    | Strategy pattern for site-specific overlay dismissal; `BooksToScrapeHandler` and `NoOpHandler`                                                  |
+| `src/pages/BasePage.ts`       | Abstract base for all page objects; wraps interactions with overlay dismissal, `AutoHealer` delegation, and Vercel security challenge detection |
+| `src/pages/BooksHomePage.ts`  | Home page entry point; `navigateToCategory()`, `clickBook()`, `getBookCount()`, pagination support                                              |
+| `src/pages/BookDetailPage.ts` | Book detail page; `getTitle()`, `getPrice()`, `getBreadcrumbs()`                                                                                |
+| `tests/fixtures/base.ts`      | Playwright fixtures providing `autoHealer` and `booksPage` to E2E tests                                                                         |
 
 ### Environment Configuration
 

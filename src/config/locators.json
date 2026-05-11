@@ -2,21 +2,15 @@
   "test": {
     "concurrentString": "value-0"
   },
-  "gigantti": {
-    "cookieBannerAccept": "#coiPage-1 .coi-banner__accept",
-    "cookieBannerWrapper": "#cookie-information-template-wrapper",
-    "searchInput": "input[type='search']",
-    "searchButton": "button[type='submit']",
-    "productCard": "[data-testid='product-card']",
-    "categoryTile": "main article li a:has(img)",
-    "addToCart": ".add-to-cart",
-    "checkout": "#checkout-btn",
-    "navLink": "//a[contains(text(), '{}')]",
-    "productTitle": [
-      ".ProductPageHeader"
-    ],
-    "productPrice": [
-      "[data-cro='pdp-main-price-box']"
-    ]
+  "booksToScrape": {
+    "categoryLink": ".side_categories ul li ul li a",
+    "bookCard": "article.product_pod",
+    "bookTitle": "article.product_pod h3 a",
+    "bookPrice": ".price_color",
+    "addToCartButton": ".btn-primary.btn-block",
+    "nextPageButton": ".pager .next a",
+    "bookDetailTitle": ".product_main h1",
+    "bookDetailPrice": ".product_main .price_color",
+    "breadcrumb": ".breadcrumb li"
   }
 }
