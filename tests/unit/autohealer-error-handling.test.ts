@@ -161,10 +161,9 @@ describe('AutoHealer Error Handling', () => {
 
             let result = undefined;
             try {
-                result = await (autoHealer as unknown as { heal(s: string, e: Error): Promise<HealingResult | null> }).heal(
-                    'broken-selector',
-                    new Error('Element not found')
-                );
+                result = await (
+                    autoHealer as unknown as { heal(s: string, e: Error): Promise<HealingResult | null> }
+                ).heal('broken-selector', new Error('Element not found'));
             } catch {
                 // heal re-throws if test.skip triggers logic that might throw in mock,
                 // but checking side effects is key

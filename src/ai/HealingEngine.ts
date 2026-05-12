@@ -6,7 +6,7 @@ import { getSimplifiedDOM } from './DOMSerializer.js';
 import { parseAIResponse } from './ResponseParser.js';
 import { validateSelector } from './SelectorValidator.js';
 import { RetryOrchestrator } from './RetryOrchestrator.js';
-import type { AIError, HealingResult, HealingEvent } from '../types.js';
+import type { HealingResult, HealingEvent } from '../types.js';
 import { CircuitBreaker } from '../utils/CircuitBreaker.js';
 
 /**

@@ -197,9 +197,7 @@ describe('HealingEngine', () => {
 
     it('captures the DOM snapshot exactly once across 401 key-rotation retries', async () => {
         const authError = Object.assign(new Error('Unauthorized'), { status: 401 });
-        vi.mocked(clientManager.makeRequest)
-            .mockRejectedValueOnce(authError)
-            .mockResolvedValueOnce({ raw: '#healed' });
+        vi.mocked(clientManager.makeRequest).mockRejectedValueOnce(authError).mockResolvedValueOnce({ raw: '#healed' });
         vi.mocked(clientManager.rotateKey).mockReturnValue(true);
         vi.mocked(clientManager.getKeyCount).mockReturnValue(2);
 
