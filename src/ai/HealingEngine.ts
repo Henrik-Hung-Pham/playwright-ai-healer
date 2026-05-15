@@ -8,11 +8,12 @@ import { validateSelector } from './SelectorValidator.js';
 import { RetryOrchestrator } from './RetryOrchestrator.js';
 import type { HealingResult, HealingEvent } from '../types.js';
 import { CircuitBreaker } from '../utils/CircuitBreaker.js';
+import { HealingMetrics } from '../utils/HealingMetrics.js';
 
 /**
  * Encapsulates the AI-powered selector healing logic.
  *
- * Given a failed selector and an zerror, `HealingEngine` captures a DOM snapshot,
+ * Given a failed selector and an error, `HealingEngine` captures a DOM snapshot,
  * asks the configured AI provider for a replacement selector, validates the result,
  * and records a `HealingEvent` for reporting.
  *
@@ -116,7 +117,7 @@ export class HealingEngine {
             if (breaker.isOpen()) {
                 logger.warn(
                     `[HealingEngine:heal] ⚡ Circuit breaker OPEN for provider "${provider}" ` +
-                        `(${breaker.getConsecutiveFailures()} consecutive failures). Fast-failing healing.`
+                    `(${breaker.getConsecutiveFailures()} consecutive failures). Fast-failing healing.`
                 );
                 return null;
             }
@@ -180,7 +181,7 @@ export class HealingEngine {
                 `[HealingEngine:heal] 📋 Success: ${healingSuccess}, Result: ${healingResult ? healingResult.selector : 'null'}`
             );
             // Record the healing event, evicting the oldest entry when the cap is reached.
-            this.healingEvents.push({
+            const healingEvent: HealingEvent = {
                 timestamp: new Date().toISOString(),
                 originalSelector,
                 result: healingResult,
@@ -190,10 +191,12 @@ export class HealingEngine {
                 durationMs,
                 ...(tokensUsed ? { tokensUsed } : {}),
                 domSnapshotLength: htmlSnapshot.length,
-            });
+            };
+            this.healingEvents.push(healingEvent);
             if (this.healingEvents.length > HealingEngine.MAX_HEALING_EVENTS) {
                 this.healingEvents.shift();
             }
+            HealingMetrics.getInstance().recordEvent(healingEvent);
         }
 
         return healingResult;
