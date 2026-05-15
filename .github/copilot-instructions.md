@@ -171,9 +171,8 @@ OPTIMIZATION_SUMMARY.md # Performance optimization notes
 **Page Objects:** (Page Object Model pattern)
 
 - `src/pages/BasePage.ts` - Abstract base page with common functionality
-- `src/pages/GiganttiHomePage.ts` - Entry point for test site
-- `src/pages/CategoryPage.ts` - Product listing page
-- `src/pages/ProductDetailPage.ts` - Product detail page
+- `src/pages/BooksHomePage.ts` - Books to Scrape home page
+- `src/pages/BookDetailPage.ts` - Book detail page
 
 **Utilities:**
 
@@ -188,7 +187,7 @@ OPTIMIZATION_SUMMARY.md # Performance optimization notes
 - `src/utils/*.test.ts` - Unit tests for utilities
 - `src/test-setup.ts` - Vitest setup and mocks
 - `tests/fixtures/base.ts` - Playwright test fixtures
-- `tests/gigantti.spec.ts` - E2E test examples
+- `tests/books-to-scrape.spec.ts` - E2E test examples
 
 **Type Definitions:**
 

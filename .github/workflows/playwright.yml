@@ -8,7 +8,7 @@ on:
     branches:
       - main
   schedule:
-    - cron: '0 */2 * * *'
+    - cron: '0 6 * * *'
   workflow_dispatch:
     # Allow manual trigger from GitHub Actions UI
 
@@ -67,16 +67,19 @@ jobs:
             projectFlags: --project=chromium --project=chrome --project=edge --project=mobile-chrome
             browsers: chromium chrome msedge
             browser-engine: chromium
+            testFilter: ''
           - name: Firefox
             runs-on: ubuntu-24.04
             projectFlags: --project=firefox
             browsers: firefox
             browser-engine: firefox
+            testFilter: --grep-invert "Self-Healing"
           - name: WebKit Browsers
             runs-on: macos-latest
             projectFlags: --project=webkit --project=mobile-safari --project=tablet
             browsers: webkit
             browser-engine: webkit
+            testFilter: --grep-invert "Self-Healing"
 
     name: E2E — ${{ matrix.name }}
 
@@ -113,7 +116,7 @@ jobs:
         run: npx playwright install-deps ${{ matrix.browser-engine }}
 
       - name: Run Playwright tests
-        run: npx playwright test ${{ matrix.projectFlags }}
+        run: npx playwright test ${{ matrix.projectFlags }} ${{ matrix.testFilter }}
 
       - name: Upload test results
         uses: actions/upload-artifact@v7

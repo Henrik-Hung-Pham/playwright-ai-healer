@@ -13,16 +13,18 @@ vi.mock('./Logger.js', () => ({
     },
 }));
 
-describe('LocatorManager Integration', () => {
+// Import the real FileAdapter — no module mock so this is a true integration test
+import { FileAdapter } from './LocatorAdapter.js';
+
+describe('FileAdapter integration', () => {
     let tmpDir: string;
     let locatorsPath: string;
 
     beforeEach(() => {
-        // Create a temporary directory for test locators
+        // Create a temporary directory with initial locator data
         tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'locator-test-'));
         locatorsPath = path.join(tmpDir, 'locators.json');
 
-        // Write initial test locators
         const initialLocators = {
             app: {
                 loginButton: '#login-btn',
@@ -36,89 +38,67 @@ describe('LocatorManager Integration', () => {
     });
 
     afterEach(() => {
-        // Clean up temporary files
         if (fs.existsSync(tmpDir)) {
             fs.rmSync(tmpDir, { recursive: true, force: true });
         }
-        // Reset module cache so LocatorManager singleton is fresh
-        vi.resetModules();
     });
 
-    it('should read locators from file', async () => {
-        // Dynamically import after setting up the file
-        vi.doMock('./LocatorManager.js', async () => {
-            // We need to test the actual implementation, not a mock
-            // Import the real module but with our custom path
-            const original = await vi.importActual<typeof import('./LocatorManager.js')>('./LocatorManager.js');
-            return original;
-        });
+    it('reads a locator by dot-path key', () => {
+        const adapter = new FileAdapter(locatorsPath);
 
-        // Since LocatorManager is a singleton that reads from a hardcoded path,
-        // we test the file operations directly
-        const fileContent = fs.readFileSync(locatorsPath, 'utf-8');
-        const locators = JSON.parse(fileContent) as Record<string, unknown>;
-
-        expect(locators['app']).toBeDefined();
-        expect((locators['app'] as Record<string, string>)['loginButton']).toBe('#login-btn');
+        expect(adapter.getLocator('app.loginButton')).toBe('#login-btn');
+        expect(adapter.getLocator('settings.saveButton')).toBe('.save-btn');
     });
 
-    it('should persist locator updates to disk', () => {
-        // Read, update, write cycle
-        const fileContent = fs.readFileSync(locatorsPath, 'utf-8');
-        const locators = JSON.parse(fileContent) as Record<string, Record<string, string>>;
+    it('returns null for a missing key', () => {
+        const adapter = new FileAdapter(locatorsPath);
 
-        // Simulate what LocatorManager.updateLocator does
-        const app = locators['app'];
-        if (app) {
-            app['loginButton'] = '#new-login-btn';
-        }
-
-        fs.writeFileSync(locatorsPath, JSON.stringify(locators, null, 2), 'utf-8');
-
-        // Read back and verify
-        const updated = JSON.parse(fs.readFileSync(locatorsPath, 'utf-8')) as Record<string, Record<string, string>>;
-        expect(updated['app']?.['loginButton']).toBe('#new-login-btn');
-        // Other locators should remain unchanged
-        expect(updated['app']?.['searchInput']).toBe('#search-input');
-        expect(updated['settings']?.['saveButton']).toBe('.save-btn');
+        expect(adapter.getLocator('app.nonexistent')).toBeNull();
+        expect(adapter.getLocator('missing.key')).toBeNull();
     });
 
-    it('should handle nested path creation', () => {
-        const fileContent = fs.readFileSync(locatorsPath, 'utf-8');
-        const locators = JSON.parse(fileContent) as Record<string, unknown>;
+    it('persists an updated locator to disk', async () => {
+        const adapter = new FileAdapter(locatorsPath);
+        await adapter.updateLocator('app.loginButton', '#new-login-btn');
 
-        // Simulate creating a new nested path (e.g., 'checkout.paymentForm.submit')
-        if (!locators['checkout']) {
-            locators['checkout'] = {};
-        }
-        const checkout = locators['checkout'] as Record<string, unknown>;
-        if (!checkout['paymentForm']) {
-            checkout['paymentForm'] = {};
-        }
-        const paymentForm = checkout['paymentForm'] as Record<string, string>;
-        paymentForm['submit'] = '#pay-now';
+        // In-memory state should reflect the update
+        expect(adapter.getLocator('app.loginButton')).toBe('#new-login-btn');
 
-        fs.writeFileSync(locatorsPath, JSON.stringify(locators, null, 2), 'utf-8');
+        // The change must also be written to disk
+        const onDisk = JSON.parse(fs.readFileSync(locatorsPath, 'utf-8')) as Record<string, Record<string, string>>;
+        expect(onDisk['app']?.['loginButton']).toBe('#new-login-btn');
+        // Unrelated locators should be untouched
+        expect(onDisk['app']?.['searchInput']).toBe('#search-input');
+        expect(onDisk['settings']?.['saveButton']).toBe('.save-btn');
+    });
 
-        // Read back and verify
-        const updated = JSON.parse(fs.readFileSync(locatorsPath, 'utf-8')) as Record<
+    it('creates intermediate objects for new dot-path keys', async () => {
+        const adapter = new FileAdapter(locatorsPath);
+        await adapter.updateLocator('checkout.paymentForm.submit', '#pay-now');
+
+        const onDisk = JSON.parse(fs.readFileSync(locatorsPath, 'utf-8')) as Record<
             string,
             Record<string, Record<string, string>>
         >;
-        expect(updated['checkout']?.['paymentForm']?.['submit']).toBe('#pay-now');
+        expect(onDisk['checkout']?.['paymentForm']?.['submit']).toBe('#pay-now');
     });
 
-    it('should handle missing locators file gracefully', () => {
-        const missingPath = path.join(tmpDir, 'nonexistent.json');
-        expect(fs.existsSync(missingPath)).toBe(false);
+    it('returns all locators as a flat key→selector map', () => {
+        const adapter = new FileAdapter(locatorsPath);
+        const all = adapter.getAllLocators();
 
-        // Without the file, LocatorManager should fall back to empty object
-        // We simulate this behavior
-        let locators: Record<string, unknown> = {};
-        if (fs.existsSync(missingPath)) {
-            locators = JSON.parse(fs.readFileSync(missingPath, 'utf-8')) as Record<string, unknown>;
-        }
+        expect(all).toMatchObject({
+            'app.loginButton': '#login-btn',
+            'app.searchInput': '#search-input',
+            'settings.saveButton': '.save-btn',
+        });
+    });
 
-        expect(Object.keys(locators).length).toBe(0);
+    it('starts with an empty store when the file does not exist', () => {
+        const missing = path.join(tmpDir, 'nonexistent.json');
+        const adapter = new FileAdapter(missing);
+
+        expect(adapter.getLocator('any.key')).toBeNull();
+        expect(adapter.getAllLocators()).toEqual({});
     });
 });

@@ -9,22 +9,18 @@ import { config } from '../src/config/index.js';
  * fix, and retry with the corrected selector.
  */
 test.describe('Self-Healing Demo', () => {
-    test('should heal a broken search button selector', async ({ giganttiPage, autoHealer }) => {
+    test('should heal a broken book card selector', async ({ booksPage, autoHealer }) => {
         // Ensure autoHealer is available
         expect(autoHealer).toBeDefined();
 
-        // Use POM to open the page
-        await giganttiPage.open();
-
-        // Use the POM's "safeFill" function with the real search input selector
-        await giganttiPage.safeFill("input[type='search']", 'laptop');
+        // Open the books home page
+        await booksPage.open();
 
         // Intentionally use a BROKEN selector with the POM's "safeClick" function
         // This demonstrates that POM functions are now self-healing!
-        await giganttiPage.safeClick('#nonexistent-search-button-xyz-12345', { timeout: config.test.timeouts.short });
-
-        // Verify the results using the POM's page instance
-        await expect(giganttiPage.page).toHaveURL(/search|haku|query/, { timeout: config.test.timeouts.short });
+        await booksPage.safeClick('#nonexistent-book-card-xyz-12345', {
+            timeout: config.test.timeouts.short,
+        });
 
         // Verify the healing events were recorded
         const events = autoHealer!.getHealingEvents();

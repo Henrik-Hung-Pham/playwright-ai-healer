@@ -86,7 +86,7 @@ Create a `.env.prod` file (or copy from `.env.example`):
 ```bash
 # Environment
 ENV=prod
-BASE_URL=https://www.gigantti.fi/
+BASE_URL=https://books.toscrape.com/
 
 # AI Provider (gemini or openai)
 AI_PROVIDER=gemini
@@ -166,10 +166,8 @@ src/
 │   └── metrics.json           # Per-key selector failure/heal metrics
 ├── pages/
 │   ├── BasePage.ts            # Abstract base page
-│   ├── GiganttiHomePage.ts    # Entry point; selectCategory<K>(key, sub?) for typed navigation
-│   ├── CategoryMenuPage.ts    # Typed category/subcategory navigation POM
-│   ├── CategoryPage.ts        # Product listings and category landing pages
-│   └── ProductDetailPage.ts   # Product details
+│   ├── BooksHomePage.ts       # Books to Scrape home page; category nav, pagination
+│   └── BookDetailPage.ts      # Book detail page; title, price, breadcrumbs
 └── utils/
     ├── Environment.ts         # Multi-env loader
     ├── Logger.ts              # Winston wrapper
@@ -178,7 +176,7 @@ src/
     └── SiteHandler.ts         # Overlay dismissal (Strategy pattern)
 
 tests/
-├── gigantti.spec.ts           # E2E tests
+├── books-to-scrape.spec.ts    # E2E tests
 ├── healing-demo.spec.ts       # Self-healing demo tests
 ├── fixtures/base.ts           # Playwright fixtures
 └── unit/                      # Unit tests

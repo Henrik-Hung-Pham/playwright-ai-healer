@@ -150,8 +150,18 @@ export class AIClientManager {
     private async callGemini(promptText: string, timeout: number): Promise<AICallResult> {
         logger.info(`[AIClientManager] 📤 Sending request to Gemini (model: ${this.modelName})...`);
         const model = this.gemini!.getGenerativeModel({ model: this.modelName });
-        // Gemini SDK does not support AbortSignal; signal is accepted but unused
-        const response = await this.withTimeout(_signal => model.generateContent(promptText), timeout, 'Gemini');
+        // Gemini SDK does not support AbortSignal; signal is accepted but unused.
+        // If the timeout fires, the underlying HTTP request continues in the background.
+        const response = await this.withTimeout(_signal => model.generateContent(promptText), timeout, 'Gemini').catch(
+            (e: unknown) => {
+                if (e instanceof Error && e.message.includes('timed out')) {
+                    logger.warn(
+                        '[AIClientManager] Gemini request timed out but AbortSignal is not honoured by the SDK — the underlying HTTP request will continue in the background'
+                    );
+                }
+                throw e;
+            }
+        );
         const raw = response.response.text().trim();
         const usageMetadata = response.response.usageMetadata;
         const tokensUsed = usageMetadata
@@ -179,7 +189,7 @@ export class AIClientManager {
         if (!apiKey) return;
 
         if (this.provider === 'openai') {
-            this.openai = new OpenAI({ apiKey, dangerouslyAllowBrowser: true });
+            this.openai = new OpenAI({ apiKey });
         } else {
             this.gemini = new GoogleGenerativeAI(apiKey);
         }
@@ -191,7 +201,7 @@ export class AIClientManager {
         // timeout race is set up. This preserves correct error-priority ordering
         // even in test environments where setTimeout is stubbed to fire synchronously.
         const requestPromise = factory(controller.signal);
-        let timeoutId: ReturnType<typeof setTimeout>;
+        let timeoutId: ReturnType<typeof setTimeout> | undefined;
         const timeoutPromise = new Promise<never>((_, reject) => {
             timeoutId = setTimeout(() => {
                 controller.abort();
@@ -201,7 +211,7 @@ export class AIClientManager {
         try {
             return await Promise.race([requestPromise, timeoutPromise]);
         } finally {
-            clearTimeout(timeoutId!);
+            if (timeoutId !== undefined) clearTimeout(timeoutId);
         }
     }
 }
