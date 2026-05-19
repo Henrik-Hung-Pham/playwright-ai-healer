@@ -65,7 +65,7 @@ Test → BasePage.safeClick/safeFill
 | `src/ai/ResponseParser.ts`    | `parseAIResponse()` — strips markdown fences, backticks, and quotes from raw AI output                                                          |
 | `src/config/index.ts`         | Centralized config validated with Zod; exports `config` object; loads `.env.{TEST_ENV}` via `Environment.ts`                                    |
 | `src/config/locators.json`    | Persistent selector store; updated at runtime by `LocatorManager` when healing succeeds                                                         |
-| `src/utils/LocatorManager.ts` | Singleton; reads/writes `locators.json` with file locking (`proper-lockfile`); dot-path key access (e.g., `booksToScrape.bookTitle`)            |
+| `src/utils/LocatorManager.ts` | Singleton facade over a pluggable `LocatorAdapter`; dot-path key access (e.g., `booksToScrape.bookTitle`); delegates all I/O to the active adapter |
 | `src/utils/SiteHandler.ts`    | Strategy pattern for site-specific overlay dismissal; `BooksToScrapeHandler` and `NoOpHandler`                                                  |
 | `src/pages/BasePage.ts`       | Abstract base for all page objects; wraps interactions with overlay dismissal, `AutoHealer` delegation, and Vercel security challenge detection |
 | `src/pages/BooksHomePage.ts`  | Home page entry point; `navigateToCategory()`, `clickBook()`, `getBookCount()`, pagination support                                              |
@@ -78,6 +78,7 @@ Environment is selected by `TEST_ENV` variable (`dev`/`staging`/`prod`). The con
 
 - `AI_PROVIDER=gemini|openai` (default: `gemini`)
 - `GEMINI_API_KEY` — required if provider is `gemini`
+- `GEMINI_MODEL` — Gemini model name (default: `gemini-flash-latest`)
 - `OPENAI_API_KEY` / `OPENAI_API_KEYS` (comma-separated for rotation) — required if provider is `openai`
 - `BASE_URL`, `LOG_LEVEL`, `HEADLESS`, `TEST_TIMEOUT`
 
@@ -106,8 +107,8 @@ Environment is selected by `TEST_ENV` variable (`dev`/`staging`/`prod`). The con
 
 GitHub Actions (`.github/workflows/playwright.yml`) runs on push/PR to `main`:
 
-1. Unit tests with coverage
-2. E2E tests across all 9 browser projects (matrix)
+1. Unit tests with coverage (includes `npm audit --audit-level=high` and `npm run lint`)
+2. E2E tests across all 9 browser projects (matrix), including Self-Healing tests on every browser
 3. Uploads HTML reports as artifacts
    Uses `npm ci` (not `npm install`) and requires `GEMINI_API_KEY` secret.
 

@@ -157,8 +157,11 @@ src/
 ├── AutoHealer.ts              # Public healing API (click, fill, hover…) + heal() orchestration
 ├── ai/
 │   ├── AIClientManager.ts     # AI client lifecycle, key rotation, provider failover
+│   ├── HealingEngine.ts       # Full heal cycle: DOM → AI → parse → validate → confidence check
+│   ├── RetryOrchestrator.ts   # Exponential backoff with jitter for AI retries
 │   ├── DOMSerializer.ts       # getSimplifiedDOM() — interactive-element snapshot
 │   ├── ResponseParser.ts      # parseAIResponse() — cleans raw AI output
+│   ├── SelectorValidator.ts   # Denylist/allowlist guard for AI-returned selectors
 │   └── index.ts               # Barrel re-export
 ├── config/
 │   ├── index.ts               # Centralized configuration
@@ -171,6 +174,8 @@ src/
 └── utils/
     ├── Environment.ts         # Multi-env loader
     ├── Logger.ts              # Winston wrapper
+    ├── CircuitBreaker.ts      # Per-provider circuit breaker (opens after 5 failures)
+    ├── HealingMetrics.ts      # Per-key selector failure/heal event tracking
     ├── LocatorAdapter.ts      # Pluggable storage: FileAdapter | SQLiteAdapter
     ├── LocatorManager.ts      # Selector persistence (facade over LocatorAdapter) + stability metrics
     └── SiteHandler.ts         # Overlay dismissal (Strategy pattern)
@@ -189,7 +194,7 @@ tests/
 GitHub Actions workflow runs on every push:
 
 - ✅ Unit tests with code coverage reporting
-- ✅ E2E tests on **all 9 browser configurations** (matrix strategy)
+- ✅ E2E tests on **all 9 browser configurations** (matrix strategy), including Self-Healing tests on every browser
 - ✅ HTML report artifacts
 - ✅ Automatic retries for flaky tests
 

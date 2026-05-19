@@ -21,7 +21,7 @@ This is a **Self-Healing Playwright Test Automation Framework** that uses Genera
 
 ### Prerequisites
 
-- Node.js 20.x (as specified in GitHub Actions workflow)
+- Node.js 24.x (as specified in `.nvmrc` and `engines.node` in `package.json`)
 - npm for package management
 - **ALWAYS run `npm install` after cloning or when dependencies change**
 
@@ -114,16 +114,17 @@ The GitHub Actions workflow (`.github/workflows/playwright.yml`) runs on:
 
 - Push to `main`
 - Pull requests to `main`
-- Scheduled hourly runs
+- Scheduled daily runs (06:00 UTC)
 - Manual trigger
 
 **Workflow steps:**
 
 1. Install dependencies with `npm ci` (not `npm install`)
-2. Install Playwright browsers
-3. Run unit tests
-4. Run Playwright E2E tests on all 9 browser configurations
-5. Upload test reports as artifacts
+2. Run `npm audit --audit-level=high` and `npm run lint`
+3. Run unit tests with coverage
+4. Install Playwright browsers (cached per engine)
+5. Run Playwright E2E tests on all 9 browser configurations, including Self-Healing tests on every browser
+6. Upload test reports as artifacts
 
 **Environment Requirements for CI:**
 
@@ -149,7 +150,6 @@ package.json          # Dependencies and scripts
 README.md             # User-facing documentation
 CONTRIBUTING.md       # Contributor guidelines
 SECURITY.md           # Security guidelines
-OPTIMIZATION_SUMMARY.md # Performance optimization notes
 ```
 
 ### Source Code Structure (`src/`)
@@ -157,16 +157,26 @@ OPTIMIZATION_SUMMARY.md # Performance optimization notes
 **Core File:**
 
 - `src/AutoHealer.ts` - Main self-healing logic, wraps Playwright interactions with AI fallback
-    - Exports `AutoHealer` class with methods: `click()`, `fill()`, `getLocator()`, `goto()`
-    - Handles both OpenAI and Gemini providers
-    - Implements retry logic and key rotation
+    - Exports `AutoHealer` class with methods: `click()`, `fill()`, `hover()`, `type()`, `check()`, `uncheck()`, `selectOption()`, `waitForSelector()`, `healAll()`
+    - Delegates AI healing to `HealingEngine`; delegates selector persistence to `LocatorManager`
+
+**AI Sub-package (`src/ai/`):**
+
+- `src/ai/AIClientManager.ts` - AI client lifecycle, API key rotation, provider failover, `makeRequest()` with timeout
+- `src/ai/HealingEngine.ts` - Orchestrates the full heal cycle: DOM capture → AI request → response parsing → selector validation → confidence check
+- `src/ai/RetryOrchestrator.ts` - Exponential backoff with jitter for AI retry loops
+- `src/ai/DOMSerializer.ts` - `getSimplifiedDOM(page)` — focused interactive-element snapshot for the AI prompt
+- `src/ai/ResponseParser.ts` - `parseAIResponse()` — strips markdown fences, backticks, and quotes from raw AI output
+- `src/ai/SelectorValidator.ts` - Denylist/allowlist guard that validates AI-returned selectors before use
+- `src/ai/index.ts` - Barrel re-export for the `ai/` sub-package
 
 **Configuration:**
 
-- `src/config/index.ts` - Centralized configuration object
+- `src/config/index.ts` - Centralized configuration object validated with Zod
     - Exports `config` with app settings, AI provider settings, selectors
     - Loads environment-specific config via `loadEnvironment()`
 - `src/config/locators.json` - Persistent storage for healed selectors
+- `src/config/metrics.json` - Per-key selector failure/heal metrics
 
 **Page Objects:** (Page Object Model pattern)
 
@@ -178,7 +188,11 @@ OPTIMIZATION_SUMMARY.md # Performance optimization notes
 
 - `src/utils/Environment.ts` - Multi-environment loader (.env.dev, .env.staging, .env.prod)
 - `src/utils/Logger.ts` - Winston logger wrapper with console + file output
-- `src/utils/LocatorManager.ts` - Manages persistent storage of healed selectors
+- `src/utils/LocatorManager.ts` - Singleton facade over a pluggable `LocatorAdapter`; dot-path key access; tracks selector stability metrics
+- `src/utils/LocatorAdapter.ts` - `LocatorAdapter` interface with `FileAdapter` (JSON + lockfile) and `SQLiteAdapter` (ACID SQLite) implementations
+- `src/utils/CircuitBreaker.ts` - Per-provider circuit breaker; opens after 5 consecutive failures, resets after 60 s
+- `src/utils/HealingMetrics.ts` - Tracks per-key selector failure and heal event counts
+- `src/utils/SiteHandler.ts` - Strategy pattern for site-specific overlay dismissal (`BooksToScrapeHandler`, `NoOpHandler`)
 
 **Testing:**
 
@@ -188,6 +202,7 @@ OPTIMIZATION_SUMMARY.md # Performance optimization notes
 - `src/test-setup.ts` - Vitest setup and mocks
 - `tests/fixtures/base.ts` - Playwright test fixtures
 - `tests/books-to-scrape.spec.ts` - E2E test examples
+- `tests/unit/` - Additional unit tests (autohealer-core, autohealer-error-handling)
 
 **Type Definitions:**
 
@@ -260,7 +275,7 @@ OPTIMIZATION_SUMMARY.md # Performance optimization notes
 ### Error Handling
 
 - AutoHealer catches interaction failures and attempts healing
-- If healing fails, original error is re-thrown
+- If the AI cannot return a usable selector (FAIL response, rate limit with no fallback, validation/confidence rejection), `AutoHealer` calls `test.skip()` rather than re-throwing
 - Failed healings are logged at `warn` level
 - Successful healings logged at `info` level
 
