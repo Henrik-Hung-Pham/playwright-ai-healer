@@ -135,7 +135,7 @@ async click(selector: string): Promise<void> { ... }
  * If the initial click fails with a locator error, triggers AI-assisted healing
  * to find a replacement selector and retries.
  *
- * @param selector - Dot-notation locator key (e.g. `gigantti.searchInput`).
+ * @param selector - Dot-notation locator key (e.g. `booksToScrape.searchInput`).
  * @param options - Optional Playwright click options.
  * @throws {Error} If healing fails after all retries are exhausted.
  */
@@ -155,7 +155,7 @@ private buildPrompt(dom: string): string { ... }
 * @example
 * ```typescript
 * const healer = new AutoHealer(page, { apiKeys: [process.env['GEMINI_API_KEY']!] });
-* await healer.click('gigantti.searchInput');
+* await healer.click('booksToScrape.searchInput');
 * ```
 ```
 

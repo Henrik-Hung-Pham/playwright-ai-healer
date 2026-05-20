@@ -33,24 +33,31 @@ const fileFormat = winston.format.combine(
     })
 );
 
-// Create the winston logger instance
-const winstonLogger = winston.createLogger({
-    level: config.logging.level,
-    transports: [
-        // Console transport for local development
-        new winston.transports.Console({
-            format: consoleFormat,
-            level: config.logging.consoleLevel,
-        }),
-        // File transport for persistent logs
-        new winston.transports.File({
-            filename: path.join(logsDir, 'execution.log'),
-            format: fileFormat,
-            maxsize: 5 * 1024 * 1024, // 5MB max file size
-            maxFiles: 3, // Keep up to 3 rotated log files
-        }),
-    ],
-});
+// Lazily create the winston logger. Deferring construction avoids a TDZ error
+// from the circular import between Logger.ts and config/index.ts — config reads
+// `logger` at module scope, so touching `config` during Logger's own module
+// init would fail when config/index.ts is loaded first.
+let winstonLoggerInstance: winston.Logger | undefined;
+function getWinstonLogger(): winston.Logger {
+    if (!winstonLoggerInstance) {
+        winstonLoggerInstance = winston.createLogger({
+            level: config.logging.level,
+            transports: [
+                new winston.transports.Console({
+                    format: consoleFormat,
+                    level: config.logging.consoleLevel,
+                }),
+                new winston.transports.File({
+                    filename: path.join(logsDir, 'execution.log'),
+                    format: fileFormat,
+                    maxsize: 5 * 1024 * 1024, // 5MB max file size
+                    maxFiles: 3, // Keep up to 3 rotated log files
+                }),
+            ],
+        });
+    }
+    return winstonLoggerInstance;
+}
 
 /**
  * Logger - Singleton logger wrapping Winston with Playwright report integration.
@@ -101,14 +108,18 @@ export class Logger {
     }
 
     private log(level: 'info' | 'warn' | 'error' | 'debug', message: string): void {
-        winstonLogger.log(level, message);
+        // Strip Unicode emoji when LOG_EMOJI=false (e.g. for CI log parsers or Windows terminals)
+        const msg = config.logging.emoji
+            ? message
+            : message.replace(/[\p{Emoji_Presentation}\p{Extended_Pictographic}]/gu, '').trim();
+        getWinstonLogger().log(level, msg);
 
         // Optionally attach to Playwright test report
         if (this.playwrightTestInfo) {
             try {
                 this.playwrightTestInfo.annotations.push({
                     type: level,
-                    description: message,
+                    description: msg,
                 });
             } catch {
                 // Ignore if test context is not active

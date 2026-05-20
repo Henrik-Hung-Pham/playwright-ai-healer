@@ -36,7 +36,7 @@ export default defineConfig({
 
     use: {
         headless: process.env['HEADLESS'] !== 'false',
-        baseURL: process.env['BASE_URL'] || 'https://www.gigantti.fi/',
+        baseURL: process.env['BASE_URL'] || 'https://books.toscrape.com/',
         screenshot: 'on-first-failure',
         video: 'retain-on-failure',
         trace: 'retain-on-failure',

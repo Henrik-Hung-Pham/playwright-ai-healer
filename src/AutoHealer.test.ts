@@ -102,7 +102,7 @@ describe('AutoHealer', () => {
             expect(mockGeminiGenerateContent).toHaveBeenCalled();
         });
 
-        it('should re-throw error when healing returns FAIL', async () => {
+        it('should skip test when healing returns FAIL (no replacement selector found)', async () => {
             (mockPage.click as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('Element not found'));
             mockGeminiGenerateContent.mockResolvedValue({
                 response: { text: () => 'FAIL' },
@@ -110,7 +110,15 @@ describe('AutoHealer', () => {
 
             const healer = new AutoHealer(mockPage as Page, 'test-key', 'gemini', undefined, true);
 
+            // Skip is unconditional when the AI cannot return a usable selector,
+            // independent of config.ai.healing.failureMode.
             await healer.click('#nonexistent');
+
+            const { test } = await import('@playwright/test');
+            expect(test.skip).toHaveBeenCalledWith(
+                true,
+                expect.stringContaining('could not find a suitable replacement selector')
+            );
         });
 
         it('should clean markdown code blocks from AI response', async () => {
@@ -340,7 +348,10 @@ describe('AutoHealer', () => {
             await healer.click('#broken');
 
             const { test } = await import('@playwright/test');
-            expect(test.skip).toHaveBeenCalledWith(true, expect.stringContaining('Client Error (4xx)'));
+            expect(test.skip).toHaveBeenCalledWith(
+                true,
+                expect.stringContaining('could not find a suitable replacement selector')
+            );
 
             // Restore config
             config.ai.openai.apiKeys = originalOpenAiKeys;
@@ -718,9 +729,11 @@ describe('AutoHealer', () => {
             (mockPage.locator as ReturnType<typeof vi.fn>).mockReturnValue(mockLocatorHandle);
 
             const healer = new AutoHealer(mockPage as Page, 'test-key', 'gemini', undefined, true);
+
             await healer.click('#broken-selector');
 
             // heal() should reject the selector and executeAction should skip the test
+            // unconditionally when no usable replacement selector is found.
             const { test } = await import('@playwright/test');
             expect(test.skip).toHaveBeenCalledWith(
                 true,
@@ -987,6 +1000,7 @@ describe('AutoHealer', () => {
                 const healerInstance = new AutoHealer(mockPage as Page, 'test-key', 'gemini', undefined, true);
 
                 // heal() returns null for invalid selectors; executeAction then calls test.skip()
+                // unconditionally when no usable replacement is found.
                 await healerInstance.click('#any-selector');
 
                 const { test } = await import('@playwright/test');
