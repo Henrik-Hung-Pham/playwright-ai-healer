@@ -86,7 +86,7 @@ Create a `.env.prod` file (or copy from `.env.example`):
 ```bash
 # Environment
 ENV=prod
-BASE_URL=https://www.gigantti.fi/
+BASE_URL=https://books.toscrape.com/
 
 # AI Provider (gemini or openai)
 AI_PROVIDER=gemini
@@ -157,8 +157,11 @@ src/
 ├── AutoHealer.ts              # Public healing API (click, fill, hover…) + heal() orchestration
 ├── ai/
 │   ├── AIClientManager.ts     # AI client lifecycle, key rotation, provider failover
+│   ├── HealingEngine.ts       # Full heal cycle: DOM → AI → parse → validate → confidence check
+│   ├── RetryOrchestrator.ts   # Exponential backoff with jitter for AI retries
 │   ├── DOMSerializer.ts       # getSimplifiedDOM() — interactive-element snapshot
 │   ├── ResponseParser.ts      # parseAIResponse() — cleans raw AI output
+│   ├── SelectorValidator.ts   # Denylist/allowlist guard for AI-returned selectors
 │   └── index.ts               # Barrel re-export
 ├── config/
 │   ├── index.ts               # Centralized configuration
@@ -166,19 +169,19 @@ src/
 │   └── metrics.json           # Per-key selector failure/heal metrics
 ├── pages/
 │   ├── BasePage.ts            # Abstract base page
-│   ├── GiganttiHomePage.ts    # Entry point; selectCategory<K>(key, sub?) for typed navigation
-│   ├── CategoryMenuPage.ts    # Typed category/subcategory navigation POM
-│   ├── CategoryPage.ts        # Product listings and category landing pages
-│   └── ProductDetailPage.ts   # Product details
+│   ├── BooksHomePage.ts       # Books to Scrape home page; category nav, pagination
+│   └── BookDetailPage.ts      # Book detail page; title, price, breadcrumbs
 └── utils/
     ├── Environment.ts         # Multi-env loader
     ├── Logger.ts              # Winston wrapper
+    ├── CircuitBreaker.ts      # Per-provider circuit breaker (opens after 5 failures)
+    ├── HealingMetrics.ts      # Per-key selector failure/heal event tracking
     ├── LocatorAdapter.ts      # Pluggable storage: FileAdapter | SQLiteAdapter
     ├── LocatorManager.ts      # Selector persistence (facade over LocatorAdapter) + stability metrics
     └── SiteHandler.ts         # Overlay dismissal (Strategy pattern)
 
 tests/
-├── gigantti.spec.ts           # E2E tests
+├── books-to-scrape.spec.ts    # E2E tests
 ├── healing-demo.spec.ts       # Self-healing demo tests
 ├── fixtures/base.ts           # Playwright fixtures
 └── unit/                      # Unit tests
@@ -191,7 +194,7 @@ tests/
 GitHub Actions workflow runs on every push:
 
 - ✅ Unit tests with code coverage reporting
-- ✅ E2E tests on **all 9 browser configurations** (matrix strategy)
+- ✅ E2E tests on **all 9 browser configurations** (matrix strategy), including Self-Healing tests on every browser
 - ✅ HTML report artifacts
 - ✅ Automatic retries for flaky tests
 

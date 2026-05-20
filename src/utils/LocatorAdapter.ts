@@ -143,6 +143,7 @@ interface BetterSqlite3Database {
         all(...params: unknown[]): unknown[];
         run(...params: unknown[]): unknown;
     };
+    close(): void;
 }
 
 /**
@@ -218,6 +219,11 @@ export class SQLiteAdapter implements LocatorAdapter {
             selector: string;
         }>;
         return Object.fromEntries(rows.map(r => [r.key, r.selector]));
+    }
+
+    /** Close the underlying database connection and release the file handle. */
+    close(): void {
+        this.db.close();
     }
 }
 

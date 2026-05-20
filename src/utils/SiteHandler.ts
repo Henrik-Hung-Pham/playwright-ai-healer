@@ -1,8 +1,4 @@
 import type { Page } from '@playwright/test';
-import { config } from '../config/index.js';
-import { logger } from './Logger.js';
-
-import locators from '../config/locators.json' with { type: 'json' };
 
 /**
  * SiteHandler - Strategy interface for site-specific overlay dismissal.
@@ -24,153 +20,6 @@ export interface SiteHandler {
 }
 
 /**
- * GiganttiHandler - SiteHandler implementation for gigantti.fi.
- *
- * Dismisses the CookieInformation SDK consent banner by waiting for it to become
- * visible and then accepting it. Silently no-ops if the banner never appears.
- *
- * Designed to be called before every user interaction (not just once), so it
- * catches cases where the banner re-appears after the initial dismissal.
- * After the first successful dismissal, subsequent calls use an instant
- * isVisible() check and return immediately if the banner is gone.
- */
-export class GiganttiHandler implements SiteHandler {
-    private dismissed = false;
-
-    async dismissOverlays(page: Page): Promise<void> {
-        // Handle Gigantti cookie consent banner using CookieInformation SDK API.
-        const cookieBtnSelector = locators.gigantti.cookieBannerAccept;
-        const cookieBtn = page.locator(cookieBtnSelector).first();
-
-        const cookieWrapperSelector = locators.gigantti.cookieBannerWrapper;
-
-        if (this.dismissed) {
-            // Fast re-check path: the banner was already dismissed once.
-            // isVisible() is instant (no polling) — return immediately if gone.
-            // If visible, the banner re-appeared; fall through to re-dismiss.
-            const wrapperVisible = await page
-                .locator(cookieWrapperSelector)
-                .isVisible()
-                .catch(() => false);
-            if (!wrapperVisible) return;
-            logger.debug('[GiganttiHandler] 🍪 Cookie banner re-appeared after initial dismissal; re-dismissing...');
-        } else {
-            try {
-                // Wait for cookie banner to appear (it renders asynchronously after page load).
-                // If it doesn't appear within the timeout, there's no banner to dismiss.
-                await cookieBtn.waitFor({ state: 'visible', timeout: config.test.timeouts.cookie });
-            } catch {
-                // Banner didn't appear — nothing to dismiss
-                return;
-            }
-        }
-
-        try {
-            // Wait for CookieInformation SDK to be fully initialized.
-            // This replaces the old waitForResponse(cabl.json) which had a race
-            // condition: if the response arrived before the listener was set up,
-            // it would needlessly wait for the full timeout duration.
-            await page
-                .waitForFunction(
-                    () => (window as unknown as Record<string, unknown>).isCookieInformationAPIReady === true,
-                    {
-                        timeout: config.test.timeouts.cookie,
-                    }
-                )
-                .catch(() => {
-                    // SDK not ready in time — proceed to fallback click
-                });
-
-            logger.debug('🍪 Dismissing Gigantti cookie banner...');
-
-            // Use SDK API to accept all cookies; fall back to direct click
-            await page.evaluate(selector => {
-                const win = window as unknown as Record<string, unknown>;
-                const ci = win.CookieInformation as { submitAllCategories?: () => void } | undefined;
-                if (typeof ci?.submitAllCategories === 'function') {
-                    ci.submitAllCategories();
-                } else {
-                    // Try to find the button using the provided comma-separated selectors
-                    const selectors = selector.split(',').map(s => s.trim());
-                    let btn: HTMLElement | null = null;
-
-                    for (const s of selectors) {
-                        btn = document.querySelector<HTMLElement>(s);
-                        if (btn) break;
-                    }
-
-                    btn?.click();
-                }
-            }, cookieBtnSelector);
-
-            // Wait for the ROOT wrapper to disappear — this is the element that actually
-            // intercepts pointer events in WebKit. Checking only the accept button is
-            // insufficient: the button can become hidden while the wrapper stays visible.
-            const cookieWrapper = page.locator(cookieWrapperSelector).first();
-            await cookieWrapper.waitFor({ state: 'hidden', timeout: config.test.timeouts.cookie }).catch(async () => {
-                logger.warn('⚠️ Cookie banner failed to dismiss normally. Attempting to force hide.');
-                // Fallback: Force hide the banner if it's still visible.
-                // Uses pointer-events:none in addition to display:none so that even if
-                // WebKit's JS re-enables the element, it cannot intercept pointer events.
-                await page.evaluate(
-                    ({ btnSelector, wrapperSelector }) => {
-                        const applyHide = (el: HTMLElement) => {
-                            el.style.setProperty('display', 'none', 'important');
-                            el.style.setProperty('visibility', 'hidden', 'important');
-                            el.style.setProperty('pointer-events', 'none', 'important');
-                        };
-
-                        const selectors = btnSelector.split(',').map(s => s.trim());
-                        // 1. Try hiding based on the button's ancestors
-                        for (const s of selectors) {
-                            const elements = document.querySelectorAll(s);
-                            elements.forEach(el => {
-                                // Walk up to find the container
-                                const container =
-                                    el.closest('#coiPage-1') ||
-                                    el.closest('.coi-banner__wrapper') ||
-                                    el.closest('[role="dialog"]') ||
-                                    el;
-                                if (container instanceof HTMLElement) applyHide(container);
-                            });
-                        }
-                        // 2. Try hiding known container selectors directly.
-                        // Includes the root wrapper (wrapperSelector from locators.json) which
-                        // is the actual pointer-events blocker in WebKit when child panels like
-                        // #coiOverlay and .coi-banner__summary remain visible after SDK dismissal.
-                        const knownSelectors = [
-                            wrapperSelector,
-                            '#coiPage-1',
-                            '#coiPage-2',
-                            '#coiPage-3',
-                            '#coiOverlay',
-                            '#coi-banner-wrapper',
-                        ];
-                        for (const sel of knownSelectors) {
-                            const el = document.querySelector<HTMLElement>(sel);
-                            if (el) applyHide(el);
-                        }
-                        // 3. Try hiding by common classes.
-                        // Includes .coi-banner__summary which is a sibling of #coiOverlay
-                        // and intercepts pointer events independently in WebKit.
-                        const knownClasses = ['.coi-banner__wrapper', '.coi-banner__container', '.coi-banner__summary'];
-                        for (const cls of knownClasses) {
-                            document.querySelectorAll(cls).forEach(el => {
-                                if (el instanceof HTMLElement) applyHide(el);
-                            });
-                        }
-                    },
-                    { btnSelector: cookieBtnSelector, wrapperSelector: cookieWrapperSelector }
-                );
-            });
-            this.dismissed = true;
-        } catch (error) {
-            logger.warn(`❌ Error dismissing cookie banner: ${error}`);
-        }
-    }
-}
-
-/**
  * NoOpHandler - No-operation SiteHandler for sites that have no overlays.
  *
  * Use this as the `siteHandler` argument to `BasePage` when the target site
@@ -179,5 +28,18 @@ export class GiganttiHandler implements SiteHandler {
 export class NoOpHandler implements SiteHandler {
     async dismissOverlays(_page: Page): Promise<void> {
         // Do nothing
+    }
+}
+
+/**
+ * BooksToScrapeHandler - SiteHandler for books.toscrape.com.
+ *
+ * Books to Scrape is a clean test site with no cookie banners or overlays.
+ * This handler is a named no-op that exists for clarity and future extensibility
+ * (e.g. if the site ever adds consent dialogs or promotional modals).
+ */
+export class BooksToScrapeHandler implements SiteHandler {
+    async dismissOverlays(_page: Page): Promise<void> {
+        // books.toscrape.com has no overlays to dismiss
     }
 }
