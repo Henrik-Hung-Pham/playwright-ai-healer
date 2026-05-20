@@ -117,7 +117,7 @@ export class HealingEngine {
             if (breaker.isOpen()) {
                 logger.warn(
                     `[HealingEngine:heal] ⚡ Circuit breaker OPEN for provider "${provider}" ` +
-                    `(${breaker.getConsecutiveFailures()} consecutive failures). Fast-failing healing.`
+                        `(${breaker.getConsecutiveFailures()} consecutive failures). Fast-failing healing.`
                 );
                 return null;
             }
