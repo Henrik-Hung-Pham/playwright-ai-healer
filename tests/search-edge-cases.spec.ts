@@ -1,45 +1,41 @@
-import { test as base, expect } from './fixtures/base.js';
+import { test, expect } from './fixtures/base.js';
 import { config } from '../src/config/index.js';
 
-const test = base.extend({
-    autoHealer: async ({}, use) => {
-        await use(undefined);
-    },
-});
+/**
+ * Category navigation edge cases. Books to Scrape has no search box, so we
+ * exercise the category sidebar with case variations and URL-shape assertions
+ * to guard against regressions in the navigation matcher.
+ */
+test.describe('Category Navigation Edge Cases', () => {
+    test('should navigate to a category matched case-insensitively (lower-case)', async ({ booksPage }) => {
+        await booksPage.open();
+        // The matcher in navigateToCategory uses a case-insensitive regex,
+        // so a lower-case label should still resolve to the Travel link.
+        await booksPage.navigateToCategory('travel');
+        await booksPage.verifyBooksDisplayed();
 
-test.describe('Search Edge Cases', () => {
-    test('should handle search for gibberish term gracefully', async ({ giganttiPage }) => {
-        await giganttiPage.open();
-
-        // Search for a nonsense string that should return no meaningful results
-        const gibberishTerm = 'zxqwkjmn99847xyz';
-        const resultsPage = await giganttiPage.searchFor(gibberishTerm);
-
-        // The page should still load without errors — either showing a "no results"
-        // message or an empty product grid. We verify the page is functional by
-        // checking it navigated to a search URL.
-        await expect(giganttiPage.page).toHaveURL(/search|haku|query|find/, {
-            timeout: config.test.timeouts.default,
+        await expect(booksPage.page).toHaveURL(/travel/i, {
+            timeout: config.test.timeouts.urlVerify,
         });
     });
 
-    test('should handle search for single character term', async ({ giganttiPage }) => {
-        await giganttiPage.open();
+    test('should navigate to a category matched case-insensitively (upper-case)', async ({ booksPage }) => {
+        await booksPage.open();
+        await booksPage.navigateToCategory('MYSTERY');
+        await booksPage.verifyBooksDisplayed();
 
-        // Single character search — site should still respond
-        const resultsPage = await giganttiPage.searchFor('a');
-        await expect(giganttiPage.page).toHaveURL(/search|haku|query|find|\/a/, {
-            timeout: config.test.timeouts.default,
+        await expect(booksPage.page).toHaveURL(/mystery/i, {
+            timeout: config.test.timeouts.urlVerify,
         });
     });
 
-    test('should handle search for numeric term', async ({ giganttiPage }) => {
-        await giganttiPage.open();
+    test('should navigate to a category with multi-word name (Historical Fiction)', async ({ booksPage }) => {
+        await booksPage.open();
+        await booksPage.navigateToCategory('Historical Fiction');
+        await booksPage.verifyBooksDisplayed();
 
-        // Numeric search term
-        const resultsPage = await giganttiPage.searchFor('12345');
-        await expect(giganttiPage.page).toHaveURL(/search|haku|query|find|12345/, {
-            timeout: config.test.timeouts.default,
+        await expect(booksPage.page).toHaveURL(/historical-fiction/i, {
+            timeout: config.test.timeouts.urlVerify,
         });
     });
 });

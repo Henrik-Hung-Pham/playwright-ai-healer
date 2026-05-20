@@ -1,54 +1,37 @@
-import { test as base, expect } from './fixtures/base.js';
+import { test, expect } from './fixtures/base.js';
 import { config } from '../src/config/index.js';
 
-const test = base.extend({
-    autoHealer: async ({}, use) => {
-        await use(undefined);
-    },
-});
-
 test.describe('Back Navigation', () => {
-    test('should navigate to product detail and go back to search results', async ({ giganttiPage }) => {
-        await giganttiPage.open();
+    test('should navigate from home to book detail and go back', async ({ booksPage }) => {
+        await booksPage.open();
+        await booksPage.verifyBooksDisplayed();
+        const homeUrl = booksPage.page.url();
 
-        const searchTerm = 'kannettava';
-        const resultsPage = await giganttiPage.searchFor(searchTerm);
-        await resultsPage.verifyProductsDisplayed();
+        const detailPage = await booksPage.clickBook(0);
+        await detailPage.verifyBookDisplayed();
 
-        // Capture the search results URL before navigating away
-        const searchUrl = giganttiPage.page.url();
+        await booksPage.page.goBack({ waitUntil: 'load' });
 
-        // Navigate to a product detail page
-        const productPage = await resultsPage.clickFirstProduct();
-        await productPage.verifyProductDetailsLoaded();
-
-        // Go back to search results
-        await giganttiPage.page.goBack({ waitUntil: 'load' });
-
-        // Verify we are back on a search-like URL
-        await expect(giganttiPage.page).toHaveURL(/search|haku|query|find|kannettava/, {
-            timeout: config.test.timeouts.default,
+        await expect(booksPage.page).toHaveURL(homeUrl, {
+            timeout: config.test.timeouts.urlVerify,
         });
+        await booksPage.verifyBooksDisplayed();
     });
 
-    test('should navigate to category product and go back to category listing', async ({ giganttiPage }) => {
-        await giganttiPage.open();
+    test('should navigate from category to book detail and go back to the category listing', async ({ booksPage }) => {
+        await booksPage.open();
+        await booksPage.navigateToCategory('Travel');
+        await booksPage.verifyBooksDisplayed();
+        const categoryUrl = booksPage.page.url();
 
-        const categoryPage = await giganttiPage.selectCategory('gaming');
-        await categoryPage.verifyProductsDisplayed();
+        const detailPage = await booksPage.clickBook(0);
+        await detailPage.verifyBookDisplayed();
 
-        // Capture URL before clicking into a product
-        const categoryUrl = giganttiPage.page.url();
+        await booksPage.page.goBack({ waitUntil: 'load' });
 
-        const productPage = await categoryPage.clickFirstProduct();
-        await productPage.verifyProductDetailsLoaded();
-
-        // Go back
-        await giganttiPage.page.goBack({ waitUntil: 'load' });
-
-        // The URL should be back to the category page or at least not the product detail
-        await expect(giganttiPage.page).not.toHaveURL(/\/product\/|\/tuote\//, {
-            timeout: config.test.timeouts.default,
+        await expect(booksPage.page).toHaveURL(categoryUrl, {
+            timeout: config.test.timeouts.urlVerify,
         });
+        await booksPage.verifyBooksDisplayed();
     });
 });

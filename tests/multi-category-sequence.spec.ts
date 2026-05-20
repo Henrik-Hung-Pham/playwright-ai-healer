@@ -1,48 +1,41 @@
-import { test as base } from './fixtures/base.js';
-
-const test = base.extend({
-    autoHealer: async ({}, use) => {
-        await use(undefined);
-    },
-});
+import { test } from './fixtures/base.js';
 
 test.describe('Multi-Category Sequential Navigation', () => {
-    test('should navigate between phones and tvs categories in sequence', async ({ giganttiPage }) => {
-        await giganttiPage.open();
+    test('should navigate between Travel and Mystery categories in sequence', async ({ booksPage }) => {
+        await booksPage.open();
 
-        // Navigate to phones
-        const phonesPage = await giganttiPage.selectCategory('phones');
-        await phonesPage.verifyProductsDisplayed();
+        await booksPage.navigateToCategory('Travel');
+        await booksPage.verifyBooksDisplayed();
 
-        // Navigate back to home and then to TVs
-        await giganttiPage.open();
-        const tvsPage = await giganttiPage.selectCategory('tvs');
-        await tvsPage.verifyProductsDisplayed();
+        // Return home and pick a different category
+        await booksPage.open();
+        await booksPage.navigateToCategory('Mystery');
+        await booksPage.verifyBooksDisplayed();
     });
 
-    test('should navigate between gaming and computers categories in sequence', async ({ giganttiPage }) => {
-        await giganttiPage.open();
+    test('should navigate between Poetry and Science Fiction categories in sequence', async ({ booksPage }) => {
+        await booksPage.open();
 
-        // Navigate to gaming
-        const gamingPage = await giganttiPage.selectCategory('gaming');
-        await gamingPage.verifyProductsDisplayed();
+        await booksPage.navigateToCategory('Poetry');
+        await booksPage.verifyBooksDisplayed();
 
-        // Navigate back to home and then to computers
-        await giganttiPage.open();
-        const computersPage = await giganttiPage.selectCategory('computers');
-        await computersPage.verifyProductsDisplayed();
+        await booksPage.open();
+        await booksPage.navigateToCategory('Science Fiction');
+        await booksPage.verifyBooksDisplayed();
     });
 
-    test('should navigate to category then subcategory then different category', async ({ giganttiPage }) => {
-        await giganttiPage.open();
+    test('should navigate to category, open a book, then go to a different category', async ({ booksPage }) => {
+        await booksPage.open();
 
-        // First: computers > monitors
-        const monitorsPage = await giganttiPage.selectCategory('computers', 'monitors');
-        await monitorsPage.verifyProductsDisplayed();
+        // First: Historical Fiction -> book detail
+        await booksPage.navigateToCategory('Historical Fiction');
+        await booksPage.verifyBooksDisplayed();
+        const detailPage = await booksPage.clickBook(0);
+        await detailPage.verifyBookDisplayed();
 
-        // Then: navigate to a completely different top-level category
-        await giganttiPage.open();
-        const gamingPage = await giganttiPage.selectCategory('gaming');
-        await gamingPage.verifyProductsDisplayed();
+        // Then return home and pick a different top-level category
+        await booksPage.open();
+        await booksPage.navigateToCategory('Travel');
+        await booksPage.verifyBooksDisplayed();
     });
 });

@@ -1,31 +1,25 @@
-import { test as base } from './fixtures/base.js';
-
-const test = base.extend({
-    autoHealer: async ({}, use) => {
-        await use(undefined);
-    },
-});
+import { test } from './fixtures/base.js';
 
 test.describe('Category Browsing', () => {
-    const categories = ['phones', 'tvs', 'gaming'] as const;
+    const categories = ['Travel', 'Mystery', 'Poetry'] as const;
 
     for (const category of categories) {
-        test(`should navigate to ${category} category and display products`, async ({ giganttiPage }) => {
-            await giganttiPage.open();
-            const categoryPage = await giganttiPage.selectCategory(category);
-            await categoryPage.verifyProductsDisplayed();
+        test(`should navigate to ${category} category and display books`, async ({ booksPage }) => {
+            await booksPage.open();
+            await booksPage.navigateToCategory(category);
+            await booksPage.verifyBooksDisplayed();
         });
     }
 
-    test('should navigate to computers category and display content', async ({ giganttiPage }) => {
-        await giganttiPage.open();
-        const categoryPage = await giganttiPage.selectCategory('computers');
-        await categoryPage.verifyProductsDisplayed();
+    test('should navigate to Historical Fiction category and display books', async ({ booksPage }) => {
+        await booksPage.open();
+        await booksPage.navigateToCategory('Historical Fiction');
+        await booksPage.verifyBooksDisplayed();
     });
 
-    test('should navigate to appliances category and display content', async ({ giganttiPage }) => {
-        await giganttiPage.open();
-        const categoryPage = await giganttiPage.selectCategory('appliances');
-        await categoryPage.verifyProductsDisplayed();
+    test('should navigate to Science Fiction category and display books', async ({ booksPage }) => {
+        await booksPage.open();
+        await booksPage.navigateToCategory('Science Fiction');
+        await booksPage.verifyBooksDisplayed();
     });
 });

@@ -1,45 +1,24 @@
-import { test as base } from './fixtures/base.js';
+import { test, expect } from './fixtures/base.js';
 
-const test = base.extend({
-    autoHealer: async ({}, use) => {
-        await use(undefined);
-    },
-});
+/**
+ * Books to Scrape has a flat category sidebar (no nested subcategories).
+ * These tests cover deep navigation: category -> book detail, verifying that
+ * the listing -> detail path works across a range of categories.
+ */
+test.describe('Category Deep Navigation', () => {
+    const journeys = ['Travel', 'Mystery', 'Historical Fiction', 'Science Fiction', 'Poetry'] as const;
 
-test.describe('Subcategory Deep Navigation', () => {
-    test('should navigate to computers then monitors subcategory', async ({ giganttiPage }) => {
-        await giganttiPage.open();
-        const categoryPage = await giganttiPage.selectCategory('computers', 'monitors');
-        await categoryPage.verifyProductsDisplayed();
-    });
+    for (const category of journeys) {
+        test(`should navigate to ${category} and open a book detail`, async ({ booksPage }) => {
+            await booksPage.open();
+            await booksPage.navigateToCategory(category);
+            await booksPage.verifyBooksDisplayed();
 
-    test('should navigate to computers then allComputers subcategory', async ({ giganttiPage }) => {
-        await giganttiPage.open();
-        const categoryPage = await giganttiPage.selectCategory('computers', 'allComputers');
-        await categoryPage.verifyProductsDisplayed();
-    });
+            const detailPage = await booksPage.clickBook(0);
+            await detailPage.verifyBookDisplayed();
 
-    test('should navigate to computers then components subcategory', async ({ giganttiPage }) => {
-        await giganttiPage.open();
-        const categoryPage = await giganttiPage.selectCategory('computers', 'components');
-        await categoryPage.verifyProductsDisplayed();
-    });
-
-    test('should navigate to tvs then headphones subcategory', async ({ giganttiPage }) => {
-        await giganttiPage.open();
-        const categoryPage = await giganttiPage.selectCategory('tvs', 'headphones');
-        await categoryPage.verifyProductsDisplayed();
-    });
-
-    test('should navigate to gaming then consoles subcategory', async ({ giganttiPage }) => {
-        await giganttiPage.open();
-        const categoryPage = await giganttiPage.selectCategory('gaming', 'consoles');
-        await categoryPage.verifyProductsDisplayed();
-    });
-
-    test('should navigate to phones then smartphones subcategory', async ({ giganttiPage }) => {
-        await giganttiPage.open();
-        const categoryPage = await giganttiPage.selectCategory('phones', 'smartphones');
-        await categoryPage.verifyProductsDisplayed();
-    });
+            const title = await detailPage.getTitle();
+            expect(title.length).toBeGreaterThan(0);
+        });
+    }
 });

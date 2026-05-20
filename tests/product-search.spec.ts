@@ -1,40 +1,39 @@
-import { test as base } from './fixtures/base.js';
-import { config } from '../src/config/index.js';
+import { test, expect } from './fixtures/base.js';
 
-const test = base.extend({
-    autoHealer: async ({}, use) => {
-        await use(undefined);
-    },
-});
-
-test.describe('Product Search and Navigation', () => {
-    test('should search for a product and land on search results', async ({ giganttiPage }) => {
-        await giganttiPage.open();
-        const searchTerm = config.testData.searchTerms[0]!;
-        const searchResultsPage = await giganttiPage.searchFor(searchTerm);
-        await searchResultsPage.verifyProductsDisplayed();
+/**
+ * Books to Scrape has no search box — the closest user journey is category
+ * navigation. These tests treat each category as a "search by topic" and
+ * verify that the corresponding listing displays results.
+ */
+test.describe('Category Search Journey', () => {
+    test('should navigate to a category and land on a results listing', async ({ booksPage }) => {
+        await booksPage.open();
+        await booksPage.navigateToCategory('Mystery');
+        await booksPage.verifyBooksDisplayed();
     });
 
-    test('should search and navigate to product detail page with loaded details', async ({ giganttiPage }) => {
-        await giganttiPage.open();
-        const searchResultsPage = await giganttiPage.searchFor('televisio');
-        await searchResultsPage.verifyProductsDisplayed();
-        const productDetailPage = await searchResultsPage.clickFirstProduct();
-        await productDetailPage.verifyProductDetailsLoaded();
+    test('should navigate to a category and open the first book detail page', async ({ booksPage }) => {
+        await booksPage.open();
+        await booksPage.navigateToCategory('Travel');
+        await booksPage.verifyBooksDisplayed();
+
+        const detailPage = await booksPage.clickBook(0);
+        await detailPage.verifyBookDisplayed();
     });
 
-    test('should search for different terms and get results each time', async ({ giganttiPage }) => {
-        await giganttiPage.open();
+    test('should navigate to different categories and get results each time', async ({ booksPage }) => {
+        await booksPage.open();
 
-        // First search
-        const firstTerm = 'kuulokkeet';
-        const firstResults = await giganttiPage.searchFor(firstTerm);
-        await firstResults.verifyProductsDisplayed();
+        // First category
+        await booksPage.navigateToCategory('Poetry');
+        await booksPage.verifyBooksDisplayed();
 
-        // Navigate back to home and search again with a different term
-        await giganttiPage.open();
-        const secondTerm = 'kamera';
-        const secondResults = await giganttiPage.searchFor(secondTerm);
-        await secondResults.verifyProductsDisplayed();
+        // Navigate back to home and pick another category
+        await booksPage.open();
+        await booksPage.navigateToCategory('Science Fiction');
+        await booksPage.verifyBooksDisplayed();
+
+        // The URL should reflect the second category
+        await expect(booksPage.page).toHaveURL(/science-fiction/i);
     });
 });
