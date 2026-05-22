@@ -159,11 +159,11 @@ describe('AutoHealer Error Handling', () => {
 
             mockGenerateContent.mockRejectedValueOnce(error429);
 
+            let result = undefined;
             try {
-                await (autoHealer as unknown as { heal(s: string, e: Error): Promise<HealingResult | null> }).heal(
-                    'broken-selector',
-                    new Error('Element not found')
-                );
+                result = await (
+                    autoHealer as unknown as { heal(s: string, e: Error): Promise<HealingResult | null> }
+                ).heal('broken-selector', new Error('Element not found'));
             } catch {
                 // heal re-throws if test.skip triggers logic that might throw in mock,
                 // but checking side effects is key
@@ -171,7 +171,7 @@ describe('AutoHealer Error Handling', () => {
 
             // HealingEngine no longer calls test.skip directly; it returns null.
             // AutoHealer then decides to skip or throw based on failureMode config.
-            // Verify heal() returned null (no result was passed back).
+            expect(result).toBeNull();
         });
     });
 

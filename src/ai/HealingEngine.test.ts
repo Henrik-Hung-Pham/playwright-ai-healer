@@ -183,6 +183,48 @@ describe('HealingEngine', () => {
         expect(result).not.toBeNull();
     });
 
+    // ── DOM snapshot caching ──────────────────────────────────────────────────
+    // The DOM snapshot must be captured exactly ONCE per heal() call and reused
+    // across all retries, key rotations, and provider switches — the page state
+    // is static within a single heal() invocation, so re-evaluating the DOM on
+    // each retry would be wasted work.
+
+    it('captures the DOM snapshot exactly once on a successful first attempt', async () => {
+        await engine.heal(page, '#broken', new Error('not found'));
+
+        expect(mockGetSimplifiedDOM).toHaveBeenCalledTimes(1);
+    });
+
+    it('captures the DOM snapshot exactly once across 401 key-rotation retries', async () => {
+        const authError = Object.assign(new Error('Unauthorized'), { status: 401 });
+        vi.mocked(clientManager.makeRequest).mockRejectedValueOnce(authError).mockResolvedValueOnce({ raw: '#healed' });
+        vi.mocked(clientManager.rotateKey).mockReturnValue(true);
+        vi.mocked(clientManager.getKeyCount).mockReturnValue(2);
+
+        await engine.heal(page, '#broken', new Error('not found'));
+
+        // Snapshot captured once, reused across the retry
+        expect(mockGetSimplifiedDOM).toHaveBeenCalledTimes(1);
+        // makeRequest called twice (one failure, one success)
+        expect(vi.mocked(clientManager.makeRequest)).toHaveBeenCalledTimes(2);
+    });
+
+    it('captures the DOM snapshot exactly once across 5xx retries', async () => {
+        vi.useFakeTimers();
+        const serverError = Object.assign(new Error('Service Unavailable'), { status: 503 });
+        vi.mocked(clientManager.makeRequest)
+            .mockRejectedValueOnce(serverError)
+            .mockResolvedValueOnce({ raw: '#healed-after-503' });
+
+        const healPromise = engine.heal(page, '#broken', new Error('not found'));
+        await vi.runAllTimersAsync();
+        await healPromise;
+        vi.useRealTimers();
+
+        expect(mockGetSimplifiedDOM).toHaveBeenCalledTimes(1);
+        expect(vi.mocked(clientManager.makeRequest)).toHaveBeenCalledTimes(2);
+    });
+
     // ── getHealingEvents ──────────────────────────────────────────────────────
 
     it('getHealingEvents returns an empty array initially', () => {
