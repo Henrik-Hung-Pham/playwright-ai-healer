@@ -11,7 +11,7 @@
         "test:chromium": "cross-env TEST_ENV=prod playwright test --project=chromium",
         "test:chrome": "cross-env TEST_ENV=prod playwright test --project=chrome",
         "test:edge": "cross-env TEST_ENV=prod playwright test --project=edge",
-        "test:healing-demo": "cross-env TEST_ENV=prod playwright test tests/healing-demo.spec.ts --project=chromium",
+        "test:healing-demo": "cross-env TEST_ENV=prod playwright test tests/healing-demo.spec.ts --project=chromium --project=chrome --project=firefox --project=webkit --project=edge --project=mobile-chrome --project=mobile-safari --project=tablet",
         "test:firefox": "cross-env TEST_ENV=prod playwright test --project=firefox",
         "test:debug:firefox": "cross-env TEST_ENV=prod LOG_LEVEL=debug playwright test --project=firefox --headed --workers=1",
         "test:webkit": "cross-env TEST_ENV=prod playwright test --project=webkit",
