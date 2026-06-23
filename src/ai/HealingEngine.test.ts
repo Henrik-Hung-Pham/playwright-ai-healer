@@ -95,6 +95,19 @@ describe('HealingEngine', () => {
         expect(result).not.toBeNull();
         expect(result?.selector).toBe('#new-btn');
         expect(result?.confidence).toBe(1.0);
+        // Strategy is now inferred from the selector rather than hardcoded to 'css'.
+        expect(result?.strategy).toBe('id');
+        expect(result?.reasoning).toMatch(/id selector/);
+    });
+
+    it('rejects a low-confidence ambiguous selector below the threshold', async () => {
+        // A class selector matching many elements scores 0.6 < 0.7 threshold.
+        mockParseAIResponse.mockReturnValue('.product_pod');
+        page = makeMockPage(12);
+
+        const result = await engine.heal(page, '.product_pod', new Error('not found'));
+
+        expect(result).toBeNull();
     });
 
     it('records a success event after a successful heal', async () => {
