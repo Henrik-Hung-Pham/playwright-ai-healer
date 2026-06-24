@@ -35,8 +35,14 @@ jobs:
       - name: Audit dependencies
         run: npm audit --audit-level=high
 
+      - name: Typecheck
+        run: npm run typecheck
+
       - name: Lint
         run: npm run lint
+
+      - name: Format check
+        run: npm run format:check
 
       - name: Run Unit Tests with Coverage
         run: npm run test:coverage
