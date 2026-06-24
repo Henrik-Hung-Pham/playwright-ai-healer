@@ -30,7 +30,7 @@ const envSchema = z.object({
     OPENAI_API_KEY: z.string().optional(),
     OPENAI_MODEL: z.string().default('gpt-4o'),
     TEST_TIMEOUT: z.string().default('180000').transform(Number),
-    DOM_SNAPSHOT_CHAR_LIMIT: z.string().default('2000').transform(Number).pipe(z.number().int().min(100)),
+    DOM_SNAPSHOT_CHAR_LIMIT: z.string().default('12000').transform(Number).pipe(z.number().int().min(100)),
     HEADLESS: z
         .string()
         .default('true')
