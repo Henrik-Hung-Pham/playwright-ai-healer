@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { loadEnvironment } from '../utils/Environment.js';
 import { logger } from '../utils/Logger.js';
+import { buildHealingPrompt } from '../ai/HealingPrompt.js';
 
 const categoriesData = {
     travel: { label: 'Travel' },
@@ -129,27 +130,7 @@ function buildConfig(): AppConfig {
                 vercelChallengePath: '.well-known/vercel/security/request-challenge',
             },
             prompts: {
-                healingPrompt: (selector: string, error: string, html: string) => {
-                    const sanitize = (s: string): string => s.replace(/[<>"'`\\]/g, '').slice(0, 200);
-                    return `
-      You are a Test Automation AI. A Playwright test failed to find or interact with an element.
-
-      Original Selector: "${sanitize(selector)}"
-      Error: "${sanitize(error)}"
-
-      Below is the current HTML of the page.
-      Analyze it to find the MOST LIKELY new selector for the element the user intended to interact with.
-
-      CRITICAL INSTRUCTIONS:
-      1. Return ONLY the new selector as a plain string.
-      2. DO NOT return markdown formatting like backticks (e.g. no \`#selector\`).
-      3. Use the original selector name as a semantic clue about the element's purpose, not a literal ID to match.
-      4. Only return "FAIL" if there is genuinely no element in the HTML that could serve the intended purpose.
-
-      HTML Snippet:
-      ${html}
-    `;
-                },
+                healingPrompt: buildHealingPrompt,
             },
         },
         test: {
