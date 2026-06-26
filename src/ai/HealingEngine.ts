@@ -5,6 +5,7 @@ import type { AIClientManager } from './AIClientManager.js';
 import { getSimplifiedDOM } from './DOMSerializer.js';
 import { parseAIResponse } from './ResponseParser.js';
 import { validateSelector } from './SelectorValidator.js';
+import { scoreSelector } from './SelectorScorer.js';
 import { RetryOrchestrator } from './RetryOrchestrator.js';
 import type { HealingResult, HealingEvent } from '../types.js';
 import { CircuitBreaker } from '../utils/CircuitBreaker.js';
@@ -148,22 +149,27 @@ export class HealingEngine {
                         `[HealingEngine:heal] 🛡️ HEALING REJECTED. AI-returned selector failed validation: "${parsed}"`
                     );
                 } else {
-                    // Verify the healed selector actually matches an element on the page
+                    // Score the healed selector against the live DOM. Confidence is
+                    // derived from real signal — match uniqueness and selector-strategy
+                    // stability — not a binary "matched something" flag.
                     const elementCount = await page.locator(parsed).count();
-                    const confidence = elementCount > 0 ? 1.0 : 0.0;
+                    const { confidence, strategy, reasoning } = scoreSelector(parsed, elementCount);
                     if (confidence < config.ai.healing.confidenceThreshold) {
                         logger.warn(
-                            `[HealingEngine:heal] 🛡️ HEALING REJECTED. Healed selector "${parsed}" matched 0 elements (confidence=${confidence} < threshold=${config.ai.healing.confidenceThreshold})`
+                            `[HealingEngine:heal] 🛡️ HEALING REJECTED. Healed selector "${parsed}" scored too low ` +
+                                `(confidence=${confidence} < threshold=${config.ai.healing.confidenceThreshold}). ${reasoning}`
                         );
                     } else {
                         healingSuccess = true;
                         healingResult = {
                             selector: parsed,
                             confidence,
-                            reasoning: 'AI found replacement selector.',
-                            strategy: 'css',
+                            reasoning,
+                            strategy,
                         };
-                        logger.info(`[HealingEngine:heal] ✨ HEALING SUCCEEDED! New selector: "${parsed}"`);
+                        logger.info(
+                            `[HealingEngine:heal] ✨ HEALING SUCCEEDED! New selector: "${parsed}" (confidence=${confidence}, strategy=${strategy})`
+                        );
                     }
                 }
             } else {
