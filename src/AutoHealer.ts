@@ -148,15 +148,10 @@ export class AutoHealer {
                 logger.info(`[AutoHealer] 🔄 Retrying with new selector: ${result.selector}`);
 
                 try {
-                    // Pre-validation: verify new selector exists before attempting action
+                    // Pre-validation: the healed selector must resolve to exactly
+                    // one element before we retry the action.
                     try {
-                        const target = this.page.locator(result.selector);
-                        const count = await target.count();
-                        if (count === 0) {
-                            throw new Error(
-                                `Healed selector '${result.selector}' resulted in 0 matches in the active DOM.`
-                            );
-                        }
+                        await this.assertUniqueMatch(result.selector);
                     } catch (validationErr) {
                         logger.warn(`[AutoHealer] ⚠️ Healed selector validation failed: ${String(validationErr)}`);
                         throw validationErr; // Pass to outer catch context for skipping
@@ -376,6 +371,7 @@ export class AutoHealer {
             if (healResult.status === 'fulfilled' && healResult.value) {
                 const newSelector = healResult.value.selector;
                 try {
+                    await this.assertUniqueMatch(newSelector);
                     await this.runOperation(failure.op, newSelector);
                     results[failure.index] = {
                         selectorOrKey: failure.op.selectorOrKey,
@@ -439,6 +435,36 @@ export class AutoHealer {
                 const _exhaustive: never = op.action;
                 throw new Error(`[AutoHealer:runOperation] Unsupported action: ${_exhaustive}`);
             }
+        }
+    }
+
+    /**
+     * Assert that a healed selector resolves to exactly one element in the live DOM.
+     *
+     * Rejecting 0 matches (a miss) and >1 matches (ambiguous — would trip
+     * Playwright strict-mode at action time) before the retry turns a late,
+     * opaque strict-mode failure into an early, explicit rejection.
+     *
+     * This is a defense-in-depth guard that complements the upstream
+     * {@link scoreSelector} confidence gate in `HealingEngine`. Most multi-match
+     * selectors are already rejected there (low uniqueness score), but a
+     * multi-match selector with a *stable* strategy (id / data-testid / role)
+     * can still clear the confidence threshold — this guard catches that case at
+     * the action boundary, where strict-mode would otherwise fail opaquely.
+     *
+     * @param selector - The healed selector to validate.
+     * @throws Error when the selector matches zero or multiple elements.
+     * @private
+     */
+    private async assertUniqueMatch(selector: string): Promise<void> {
+        const count = await this.page.locator(selector).count();
+        if (count === 0) {
+            throw new Error(`Healed selector '${selector}' resulted in 0 matches in the active DOM.`);
+        }
+        if (count > 1) {
+            throw new Error(
+                `Healed selector '${selector}' is ambiguous — resolved to ${count} elements (expected exactly 1).`
+            );
         }
     }
 

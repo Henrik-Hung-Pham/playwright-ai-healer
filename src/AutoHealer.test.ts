@@ -744,6 +744,39 @@ describe('AutoHealer', () => {
             const clickCalls = (mockPage.click as ReturnType<typeof vi.fn>).mock.calls;
             expect(clickCalls).toHaveLength(1); // Only the original failed call
         });
+
+        it('should not retry the action when the healed selector is ambiguous (>1 match)', async () => {
+            // First click fails, triggering healing.
+            (mockPage.click as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+                new Error('TimeoutError: Element not found')
+            );
+
+            // AI returns a multi-match selector with a *stable* strategy. A
+            // data-testid match scores 0.5 (multi) + 0.2 (data-testid) = 0.70,
+            // which clears the 0.70 confidence threshold — so SelectorScorer
+            // accepts it. This is the residual gap that assertUniqueMatch closes:
+            // a high-confidence selector that still resolves to >1 element would
+            // otherwise trip Playwright strict-mode at action time.
+            mockGeminiGenerateContent.mockResolvedValue({
+                response: { text: () => '[data-testid="card"]' },
+            });
+
+            // locator().count() returns 2 — selector is ambiguous.
+            const mockLocatorHandle = {
+                waitFor: vi.fn().mockResolvedValue(undefined),
+                count: vi.fn().mockResolvedValue(2),
+            };
+            (mockPage.locator as ReturnType<typeof vi.fn>).mockReturnValue(mockLocatorHandle);
+
+            const healer = new AutoHealer(mockPage as Page, 'test-key', 'gemini', undefined, true);
+
+            // failureMode is 'fail' in the test config, so an ambiguous healed selector throws.
+            await expect(healer.click('#broken-selector')).rejects.toThrow(/failed during interaction/);
+
+            // Only the original failed click — the retry was never attempted.
+            const clickCalls = (mockPage.click as ReturnType<typeof vi.fn>).mock.calls;
+            expect(clickCalls).toHaveLength(1);
+        });
     });
 
     describe('validateSelector()', () => {
