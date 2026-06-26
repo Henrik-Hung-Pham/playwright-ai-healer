@@ -9,17 +9,17 @@
 
 ## ✨ Features
 
-| Feature                     | Description                                                                       |
-| --------------------------- | --------------------------------------------------------------------------------- |
-| 🔧 **AI Self-Healing**      | Automatically fixes broken selectors using OpenAI or Gemini                       |
-| 🔒 **Selector Validation**  | Denylist/allowlist guards reject dangerous or malformed AI-returned selectors     |
-| ✅ **Confidence Threshold** | Healed selectors are verified against the live DOM before use (element count > 0) |
-| 🔄 **Provider Fallback**    | Automatically switches between Gemini/OpenAI on rate limits                       |
-| 🌐 **Multi-Browser**        | Chromium, Chrome, Firefox, Safari, Edge + Mobile devices                          |
-| 🌍 **Multi-Environment**    | Dev, Staging, Prod configs with `.env.{env}` files                                |
-| 📊 **Structured Logging**   | Winston logger with console + file output                                         |
-| 📄 **Page Object Model**    | Clean POM architecture with proper page flows                                     |
-| 🔄 **CI/CD Ready**          | GitHub Actions with retries and HTML reports                                      |
+| Feature                     | Description                                                                                                                             |
+| --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| 🔧 **AI Self-Healing**      | Automatically fixes broken selectors using OpenAI or Gemini                                                                             |
+| 🔒 **Selector Validation**  | Denylist/allowlist guards reject dangerous or malformed AI-returned selectors                                                           |
+| ✅ **Confidence Threshold** | Healed selectors are scored against the live DOM (match uniqueness + strategy) and must resolve to exactly one element before the retry |
+| 🔄 **Provider Fallback**    | Automatically switches between Gemini/OpenAI on rate limits                                                                             |
+| 🌐 **Multi-Browser**        | Chromium, Chrome, Firefox, Safari, Edge + Mobile devices                                                                                |
+| 🌍 **Multi-Environment**    | Dev, Staging, Prod configs with `.env.{env}` files                                                                                      |
+| 📊 **Structured Logging**   | Winston logger with console + file output                                                                                               |
+| 📄 **Page Object Model**    | Clean POM architecture with proper page flows                                                                                           |
+| 🔄 **CI/CD Ready**          | GitHub Actions with retries and HTML reports                                                                                            |
 
 ## 🚀 Quick Start
 
@@ -234,8 +234,9 @@ async click(selector: string) {
     const result = await this.heal(selector, error);
     // heal() internally:
     //   a) validateSelector() — denylist/allowlist guards against dangerous patterns
-    //   b) page.locator(result).count() — confidence threshold (must be > 0 in live DOM)
+    //   b) scoreSelector() — confidence from match uniqueness + selector strategy
     if (result) {
+      // assertUniqueMatch() — healed selector must resolve to exactly 1 element
       await this.page.click(result.selector);
       this.healingEvents.push(event); // accessible via getHealingEvents()
     }

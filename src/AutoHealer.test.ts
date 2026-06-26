@@ -751,9 +751,14 @@ describe('AutoHealer', () => {
                 new Error('TimeoutError: Element not found')
             );
 
-            // AI returns a valid-looking selector that resolves to multiple elements.
+            // AI returns a multi-match selector with a *stable* strategy. A
+            // data-testid match scores 0.5 (multi) + 0.2 (data-testid) = 0.70,
+            // which clears the 0.70 confidence threshold — so SelectorScorer
+            // accepts it. This is the residual gap that assertUniqueMatch closes:
+            // a high-confidence selector that still resolves to >1 element would
+            // otherwise trip Playwright strict-mode at action time.
             mockGeminiGenerateContent.mockResolvedValue({
-                response: { text: () => '.ambiguous' },
+                response: { text: () => '[data-testid="card"]' },
             });
 
             // locator().count() returns 2 — selector is ambiguous.

@@ -445,6 +445,13 @@ export class AutoHealer {
      * Playwright strict-mode at action time) before the retry turns a late,
      * opaque strict-mode failure into an early, explicit rejection.
      *
+     * This is a defense-in-depth guard that complements the upstream
+     * {@link scoreSelector} confidence gate in `HealingEngine`. Most multi-match
+     * selectors are already rejected there (low uniqueness score), but a
+     * multi-match selector with a *stable* strategy (id / data-testid / role)
+     * can still clear the confidence threshold — this guard catches that case at
+     * the action boundary, where strict-mode would otherwise fail opaquely.
+     *
      * @param selector - The healed selector to validate.
      * @throws Error when the selector matches zero or multiple elements.
      * @private
