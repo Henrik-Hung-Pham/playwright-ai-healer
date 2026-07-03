@@ -159,6 +159,30 @@ describe('AIClientManager', () => {
             await expect(manager.makeRequest('test', 30000)).rejects.toThrow('No AI client initialised');
         });
 
+        it('should forward an AbortSignal to the Gemini SDK', async () => {
+            mockGeminiGenerateContent.mockResolvedValue({
+                response: { text: () => '#healed' },
+            });
+
+            const manager = new AIClientManager('gemini-key', 'gemini', 'gemini-flash');
+            await manager.makeRequest('test prompt', 30000);
+
+            const [prompt, opts] = mockGeminiGenerateContent.mock.calls[0] as [string, { signal?: AbortSignal }];
+            expect(prompt).toBe('test prompt');
+            expect(opts.signal).toBeInstanceOf(AbortSignal);
+        });
+
+        it('should abort the Gemini request when the timeout elapses', async () => {
+            // SDK call never settles; the withTimeout race must reject and fire abort.
+            mockGeminiGenerateContent.mockReturnValue(new Promise(() => {}));
+
+            const manager = new AIClientManager('gemini-key', 'gemini', 'gemini-flash');
+            await expect(manager.makeRequest('test prompt', 5)).rejects.toThrow(/timed out/);
+
+            const opts = mockGeminiGenerateContent.mock.calls[0]?.[1] as { signal: AbortSignal } | undefined;
+            expect(opts?.signal.aborted).toBe(true);
+        });
+
         it('should handle Gemini response without usageMetadata', async () => {
             mockGeminiGenerateContent.mockResolvedValue({
                 response: {

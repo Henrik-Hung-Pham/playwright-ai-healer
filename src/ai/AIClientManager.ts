@@ -150,17 +150,13 @@ export class AIClientManager {
     private async callGemini(promptText: string, timeout: number): Promise<AICallResult> {
         logger.info(`[AIClientManager] 📤 Sending request to Gemini (model: ${this.modelName})...`);
         const model = this.gemini!.getGenerativeModel({ model: this.modelName });
-        // Gemini SDK does not support AbortSignal; signal is accepted but unused.
-        // If the timeout fires, the underlying HTTP request continues in the background.
-        const response = await this.withTimeout(_signal => model.generateContent(promptText), timeout, 'Gemini').catch(
-            (e: unknown) => {
-                if (e instanceof Error && e.message.includes('timed out')) {
-                    logger.warn(
-                        '[AIClientManager] Gemini request timed out but AbortSignal is not honoured by the SDK — the underlying HTTP request will continue in the background'
-                    );
-                }
-                throw e;
-            }
+        // Forward the AbortSignal to the SDK via SingleRequestOptions so a timeout
+        // actually cancels the in-flight request client-side instead of leaking it
+        // in the background.
+        const response = await this.withTimeout(
+            signal => model.generateContent(promptText, { signal }),
+            timeout,
+            'Gemini'
         );
         const raw = response.response.text().trim();
         const usageMetadata = response.response.usageMetadata;
