@@ -105,7 +105,7 @@ TEST_TIMEOUT=120000
 HEADLESS=true
 
 # AI Healing (optional — defaults shown)
-DOM_SNAPSHOT_CHAR_LIMIT=2000   # Max chars of DOM sent to AI; must be >= 100
+DOM_SNAPSHOT_CHAR_LIMIT=12000  # Max chars of DOM sent to AI; must be >= 100 (serialiser caps at 15000)
 
 # Locator Storage Backend
 LOCATOR_STORE=file    # 'file' (default, JSON + lockfile) or 'sqlite' (ACID SQLite)

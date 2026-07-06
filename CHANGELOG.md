@@ -15,6 +15,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **Default `DOM_SNAPSHOT_CHAR_LIMIT` raised from 2000 → 12000** — the previous default truncated the prepared DOM snapshot to ~13% of what the serialiser builds (it caps raw output at 15000 chars), starving the AI of context on real-world pages. The new default keeps headroom for the prompt scaffolding; lower it to trade healing accuracy for token cost.
+
 - **Self-Healing tests run on all browsers in CI** — the `--grep-invert "Self-Healing"` filter has been removed from the Firefox and WebKit matrix shards; healing scenarios now execute across all nine browser projects (Chromium, Chrome, Edge, Mobile Chrome, Firefox, WebKit, Mobile Safari, Tablet) instead of Chromium only.
 
 - **Healing failure → unconditional skip** — when the AI cannot return a usable replacement selector (FAIL response, 4xx with no fallback provider, validation/confidence rejection), `AutoHealer` now always calls `test.skip()` instead of throwing, regardless of `config.ai.healing.failureMode`. The test cannot proceed without a selector, so failing it adds noise rather than signal. The `failureMode` setting still gates the separate "healed selector failed during interaction" branch.
