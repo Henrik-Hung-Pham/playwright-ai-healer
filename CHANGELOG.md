@@ -8,10 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Security
 
-- **Patched 4 dependency advisories** (`npm audit` now reports 0 vulnerabilities) via lock-file bumps within existing semver ranges — no `package.json` changes required:
+- **Patched 5 dependency advisories** (`npm audit` now reports 0 vulnerabilities) via lock-file bumps within existing semver ranges — no `package.json` changes required:
     - `vitest` <4.1.0 → 4.1.8 (critical — Vitest UI server allowed arbitrary file read/execute, [GHSA-5xrq-8626-4rwp](https://github.com/advisories/GHSA-5xrq-8626-4rwp)) and its dependent `@vitest/coverage-v8`
     - `postcss` <8.5.10 → 8.5.15 (moderate — XSS via unescaped `</style>` in stringify output, [GHSA-qx2v-qp2m-jg93](https://github.com/advisories/GHSA-qx2v-qp2m-jg93))
     - `brace-expansion` 5.0.2–5.0.5 → 5.0.6 (moderate — large numeric range defeats `max` DoS protection, [GHSA-jxxr-4gwj-5jf2](https://github.com/advisories/GHSA-jxxr-4gwj-5jf2))
+    - `brace-expansion` 5.0.6 → 5.0.7 (high — DoS via exponential-time expansion of consecutive non-expanding `{}` groups, [GHSA-3jxr-9vmj-r5cp](https://github.com/advisories/GHSA-3jxr-9vmj-r5cp)); reached only as a dev-only transitive of `eslint` → `minimatch`, so no runtime exposure, but it tripped the CI `npm audit --audit-level=high` gate
 
 ### Changed
 
