@@ -135,6 +135,11 @@ npm audit
 npm audit fix
 ```
 
+CI runs `npm audit --audit-level=high` in a dedicated `audit` job on the nightly
+schedule and on manual `workflow_dispatch` — not on pull requests, so that a
+newly-published advisory cannot block unrelated work. Run the command locally
+before pushing any dependency change.
+
 ### Trusted Packages
 
 This project uses well-maintained packages:

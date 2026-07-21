@@ -107,10 +107,15 @@ Environment is selected by `TEST_ENV` variable (`dev`/`staging`/`prod`). The con
 
 GitHub Actions (`.github/workflows/playwright.yml`) runs on push/PR to `main`:
 
-1. Unit tests with coverage (includes `npm audit --audit-level=high` and `npm run lint`)
+1. Unit tests with coverage (includes `npm run typecheck`, `npm run lint`, and `npm run format:check`)
 2. E2E tests across all 9 browser projects (matrix), including Self-Healing tests on every browser
 3. Uploads HTML reports as artifacts
    Uses `npm ci` (not `npm install`) and requires `GEMINI_API_KEY` secret.
+
+`npm audit --audit-level=high` runs in a separate `audit` job gated to the nightly
+schedule and manual `workflow_dispatch` — **not** on PRs. Advisories publish on the
+ecosystem's schedule, so gating PRs on them turns unrelated branches red. Run
+`npm audit --audit-level=high` locally before pushing a dependency change.
 
 ## Agents
 
