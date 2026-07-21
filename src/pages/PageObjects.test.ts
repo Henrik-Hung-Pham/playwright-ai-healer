@@ -117,6 +117,37 @@ describe('Page Objects', () => {
             expect(mockLocator.locator).toHaveBeenCalledWith('.btn-primary');
             expect(mockLocator.click).toHaveBeenCalledWith(expect.any(Object));
         });
+
+        it('should report whether a next page exists', async () => {
+            const hasNext = await homePage.hasNextPage();
+            expect(mockPage.locator).toHaveBeenCalledWith('.pager .next a');
+            expect(hasNext).toBe(true);
+        });
+
+        it('should return false from hasNextPage when visibility check rejects', async () => {
+            (mockLocator.isVisible as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('detached'));
+            const hasNext = await homePage.hasNextPage();
+            expect(hasNext).toBe(false);
+        });
+
+        it('should navigate to the next page', async () => {
+            await homePage.goToNextPage();
+            expect(mockPage.locator).toHaveBeenCalledWith('.pager .next a');
+            expect(mockLocator.click).toHaveBeenCalled();
+        });
+
+        it('should get the price of a book by index', async () => {
+            const price = await homePage.getBookPrice(0);
+            expect(mockPage.locator).toHaveBeenCalledWith('article.product_pod');
+            expect(mockLocator.locator).toHaveBeenCalledWith('.price_color');
+            expect(price).toBe('Test Text');
+        });
+
+        it('should return an empty string when a book price is missing', async () => {
+            (mockLocator.textContent as ReturnType<typeof vi.fn>).mockResolvedValueOnce(null);
+            const price = await homePage.getBookPrice(2);
+            expect(price).toBe('');
+        });
     });
 
     describe('BookDetailPage', () => {
