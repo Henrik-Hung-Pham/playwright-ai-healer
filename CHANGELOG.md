@@ -14,6 +14,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     - `brace-expansion` 5.0.2–5.0.5 → 5.0.6 (moderate — large numeric range defeats `max` DoS protection, [GHSA-jxxr-4gwj-5jf2](https://github.com/advisories/GHSA-jxxr-4gwj-5jf2))
     - `brace-expansion` 5.0.6 → 5.0.7 (high — DoS via exponential-time expansion of consecutive non-expanding `{}` groups, [GHSA-3jxr-9vmj-r5cp](https://github.com/advisories/GHSA-3jxr-9vmj-r5cp)); reached only as a dev-only transitive of `eslint` → `minimatch`, so no runtime exposure, but it tripped the CI `npm audit --audit-level=high` gate
 
+### Fixed
+
+- **Healing prompt now states the uniqueness contract** — `buildHealingPrompt()` never told the model that a healed selector must resolve to exactly one element, while `scoreSelector()` caps a multi-match selector's uniqueness at 0.5 (0.6 confidence for a `text`/`css` strategy, below the 0.7 threshold) and `AutoHealer.assertUniqueMatch()` rejects anything matching more than one element at action time. On a listing page the model returned semantically correct but ambiguous selectors — e.g. `text="Add to basket"`, matching all 20 book cards — which were rejected outright, so both self-healing E2E tests took the graceful-skip path on every run. The framework's headline feature was never actually exercised, and CI still reported green because a skip is not a failure. The prompt now requires exactly one match and shows the model how to disambiguate one of several repeated elements via Playwright's `>> nth=` suffix. The model now returns selectors such as `article >> nth=0` (confidence 0.9), and both tests pass instead of skipping.
+
 ### Changed
 
 - **Default `DOM_SNAPSHOT_CHAR_LIMIT` raised from 2000 → 12000** — the previous default truncated the prepared DOM snapshot to ~13% of what the serialiser builds (it caps raw output at 15000 chars), starving the AI of context on real-world pages. The new default keeps headroom for the prompt scaffolding; lower it to trade healing accuracy for token cost.
