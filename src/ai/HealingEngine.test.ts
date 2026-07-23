@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Page } from '@playwright/test';
-import { HealingEngine } from './HealingEngine.js';
+import { HealingEngine, hasPositionalSuffix } from './HealingEngine.js';
 import type { AIClientManager } from './AIClientManager.js';
 
 // ---------------------------------------------------------------------------
@@ -51,6 +51,18 @@ function makeMockPage(elementCount = 1): Page {
         locator: vi.fn().mockReturnValue({
             count: vi.fn().mockResolvedValue(elementCount),
         }),
+    } as unknown as Page;
+}
+
+/**
+ * A page mock whose `locator(sel).count()` depends on the selector string, so
+ * the disambiguation path (base selector vs. its `>> nth=0` form) can be tested.
+ */
+function makeSelectorAwarePage(counts: Record<string, number>, fallback = 0): Page {
+    return {
+        locator: vi.fn((sel: string) => ({
+            count: vi.fn().mockResolvedValue(sel in counts ? counts[sel] : fallback),
+        })),
     } as unknown as Page;
 }
 
@@ -108,6 +120,41 @@ describe('HealingEngine', () => {
         const result = await engine.heal(page, '.product_pod', new Error('not found'));
 
         expect(result).toBeNull();
+    });
+
+    // ── Ambiguous-selector disambiguation ─────────────────────────────────────
+
+    it('disambiguates an ambiguous selector by pinning it to the first match', async () => {
+        // `article` matches every book card (20); `article >> nth=0` matches one.
+        mockParseAIResponse.mockReturnValue('article');
+        page = makeSelectorAwarePage({ article: 20, 'article >> nth=0': 1 });
+
+        const result = await engine.heal(page, '#nonexistent-card', new Error('not found'));
+
+        expect(result).not.toBeNull();
+        expect(result?.selector).toBe('article >> nth=0');
+        expect(result?.confidence).toBeGreaterThanOrEqual(0.7);
+    });
+
+    it('leaves an ambiguous selector unchanged when pinning does not narrow it to one', async () => {
+        // Both the base and pinned forms still report multiple matches → still rejected.
+        mockParseAIResponse.mockReturnValue('.product_pod');
+        page = makeSelectorAwarePage({ '.product_pod': 12, '.product_pod >> nth=0': 12 });
+
+        const result = await engine.heal(page, '.product_pod', new Error('not found'));
+
+        expect(result).toBeNull();
+    });
+
+    it('does not pin a selector that already carries a positional suffix', async () => {
+        mockParseAIResponse.mockReturnValue('article >> nth=2');
+        page = makeSelectorAwarePage({ 'article >> nth=2': 1 });
+
+        const result = await engine.heal(page, '#nonexistent-card', new Error('not found'));
+
+        expect(result?.selector).toBe('article >> nth=2');
+        // Guard against a double-append such as "article >> nth=2 >> nth=0".
+        expect(result?.selector).not.toContain('nth=0');
     });
 
     it('records a success event after a successful heal', async () => {
@@ -263,4 +310,24 @@ describe('HealingEngine', () => {
         expect(event?.durationMs).toBeGreaterThanOrEqual(0);
         expect(typeof event?.domSnapshotLength).toBe('number');
     });
+});
+
+describe('hasPositionalSuffix', () => {
+    it.each([
+        'article >> nth=0',
+        'ul >> first',
+        'div >> last',
+        'li:nth-child(2)',
+        'tr:first-child',
+        'td:nth-of-type(3)',
+    ])('detects a positional suffix in "%s"', selector => {
+        expect(hasPositionalSuffix(selector)).toBe(true);
+    });
+
+    it.each(['article', '.product_pod', '#id', 'button[type=submit]', 'text=Add to basket'])(
+        'reports no positional suffix in "%s"',
+        selector => {
+            expect(hasPositionalSuffix(selector)).toBe(false);
+        }
+    );
 });
