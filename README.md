@@ -106,6 +106,9 @@ HEADLESS=true
 
 # AI Healing (optional — defaults shown)
 DOM_SNAPSHOT_CHAR_LIMIT=12000  # Max chars of DOM sent to AI; must be >= 100 (serialiser caps at 15000)
+HEALING_FAILURE_MODE=fail      # 'fail' (default) throws when healing cannot produce a usable
+                               # selector; 'skip' calls test.skip() instead. Prefer 'fail' — a
+                               # skipped test reports green, hiding a healer that never worked.
 
 # Locator Storage Backend
 LOCATOR_STORE=file    # 'file' (default, JSON + lockfile) or 'sqlite' (ACID SQLite)

@@ -25,7 +25,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **Self-Healing tests run on all browsers in CI** — the `--grep-invert "Self-Healing"` filter has been removed from the Firefox and WebKit matrix shards; healing scenarios now execute across all nine browser projects (Chromium, Chrome, Edge, Mobile Chrome, Firefox, WebKit, Mobile Safari, Tablet) instead of Chromium only.
 
-- **Healing failure → unconditional skip** — when the AI cannot return a usable replacement selector (FAIL response, 4xx with no fallback provider, validation/confidence rejection), `AutoHealer` now always calls `test.skip()` instead of throwing, regardless of `config.ai.healing.failureMode`. The test cannot proceed without a selector, so failing it adds noise rather than signal. The `failureMode` setting still gates the separate "healed selector failed during interaction" branch.
+- **Healing failure now fails the test** — when the AI cannot return a usable replacement selector (FAIL response, 4xx with no fallback provider, validation/confidence rejection), `AutoHealer` throws instead of calling `test.skip()`. This branch previously skipped unconditionally, ignoring `config.ai.healing.failureMode`, on the reasoning that a test which cannot proceed produces noise rather than signal. In practice it made a broken healer indistinguishable from a working one: the suite reported green while the feature under test never ran — which is exactly how the two self-healing E2E specs sat silently skipped. Both healing failure branches now honour `failureMode`, which defaults to `fail`; set `HEALING_FAILURE_MODE=skip` to restore the previous behaviour.
 
 ### Refactored
 

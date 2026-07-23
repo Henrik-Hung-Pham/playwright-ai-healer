@@ -72,10 +72,10 @@ export class AutoHealer {
      *
      * @param selectorOrKey - CSS selector or locator key from locators.json
      * @param options - Playwright click options
-     * The test is skipped (`test.skip`) when the AI cannot return a usable
-     * replacement selector. If a healed selector is returned but interaction
-     * still fails, behaviour follows `config.ai.healing.failureMode`
-     * (`fail` → throw, `skip` → `test.skip`).
+     * Both healing failure modes — the AI returning no usable replacement
+     * selector, and a healed selector that still fails on interaction — follow
+     * `config.ai.healing.failureMode` (`fail` → throw, `skip` → `test.skip`),
+     * which defaults to `fail`.
      */
     async click(selectorOrKey: string, options?: ClickOptions) {
         await this.executeAction(
@@ -99,10 +99,10 @@ export class AutoHealer {
      * @param selectorOrKey - CSS selector or locator key from locators.json
      * @param value - Text value to fill
      * @param options - Playwright fill options
-     * The test is skipped (`test.skip`) when the AI cannot return a usable
-     * replacement selector. If a healed selector is returned but interaction
-     * still fails, behaviour follows `config.ai.healing.failureMode`
-     * (`fail` → throw, `skip` → `test.skip`).
+     * Both healing failure modes — the AI returning no usable replacement
+     * selector, and a healed selector that still fails on interaction — follow
+     * `config.ai.healing.failureMode` (`fail` → throw, `skip` → `test.skip`),
+     * which defaults to `fail`.
      */
     async fill(selectorOrKey: string, value: string, options?: FillOptions) {
         await this.executeAction(
@@ -176,12 +176,21 @@ export class AutoHealer {
                     }
                 }
             } else {
-                // When the AI cannot return a usable replacement selector, the test
-                // physically cannot proceed — always skip regardless of failureMode.
+                // The AI could not return a usable replacement selector. This branch
+                // previously skipped unconditionally, on the reasoning that a test
+                // which cannot proceed produces noise rather than signal. In practice
+                // that made a broken healer indistinguishable from a working one: the
+                // suite reported green while the feature under test never ran. A skip
+                // is not a pass, so this now honours `failureMode` like the sibling
+                // branch above — and `failureMode` defaults to 'fail'.
                 logger.warn(`[AutoHealer] 🚫 AI could not find a new selector.`);
                 const msg = 'AutoHealer AI could not find a suitable replacement selector.';
-                test.info().annotations.push({ type: 'warning', description: `Test skipped because ${msg}` });
-                test.skip(true, `Test skipped because ${msg}`);
+                if (config.ai.healing.failureMode === 'skip') {
+                    test.info().annotations.push({ type: 'warning', description: `Test skipped because ${msg}` });
+                    test.skip(true, `Test skipped because ${msg}`);
+                } else {
+                    throw new Error(`[AutoHealer] ${msg} Original selector: '${selector}'.`);
+                }
             }
         }
     }
