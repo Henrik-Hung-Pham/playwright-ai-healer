@@ -78,7 +78,7 @@ Environment is selected by `TEST_ENV` variable (`dev`/`staging`/`prod`). The con
 
 - `AI_PROVIDER=gemini|openai` (default: `gemini`)
 - `GEMINI_API_KEY` — required if provider is `gemini`
-- `GEMINI_MODEL` — Gemini model name (default: `gemini-flash-latest`)
+- `GEMINI_MODEL` — Gemini/Gemma model name (default: `gemma-4-31b-it`)
 - `OPENAI_API_KEY` / `OPENAI_API_KEYS` (comma-separated for rotation) — required if provider is `openai`
 - `BASE_URL`, `LOG_LEVEL`, `HEADLESS`, `TEST_TIMEOUT`
 

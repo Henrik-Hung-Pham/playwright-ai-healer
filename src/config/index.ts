@@ -26,7 +26,14 @@ const envSchema = z.object({
         .pipe(z.string().url()),
     AI_PROVIDER: z.enum(['gemini', 'openai']).default('gemini'),
     GEMINI_API_KEY: z.string().optional(),
-    GEMINI_MODEL: z.string().default('gemini-flash-latest'),
+    // Coerce an unset OR empty value to the default. CI passes the model via the
+    // `GEMINI_MODEL` secret (`GEMINI_MODEL: ${{ secrets.GEMINI_MODEL }}`); when
+    // that secret is empty or removed GitHub still injects an empty string, which
+    // a plain `.default()` would NOT replace — leaving an invalid empty model name.
+    GEMINI_MODEL: z
+        .string()
+        .optional()
+        .transform(val => (val && val.trim() !== '' ? val.trim() : 'gemma-4-31b-it')),
     OPENAI_API_KEYS: z.string().optional(),
     OPENAI_API_KEY: z.string().optional(),
     OPENAI_MODEL: z.string().default('gpt-4o'),

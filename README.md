@@ -91,7 +91,7 @@ BASE_URL=https://books.toscrape.com/
 # AI Provider (gemini or openai)
 AI_PROVIDER=gemini
 GEMINI_API_KEY=your_gemini_key_here
-GEMINI_MODEL=gemini-flash-latest
+GEMINI_MODEL=gemma-4-31b-it
 
 # Or use OpenAI
 OPENAI_API_KEY=sk-your-openai-key
