@@ -10,6 +10,34 @@ export interface AICallResult {
 }
 
 /**
+ * System instruction that constrains the model to emit a bare selector.
+ *
+ * Providers weight a dedicated system instruction above user-prompt text, so
+ * stating the output contract here — rather than only inline in the healing
+ * prompt — is what stops the model from replying with a chain-of-thought essay
+ * ("Task: find a replacement selector…") that the {@link parseAIResponse}
+ * cleaner cannot reduce to a usable selector.
+ */
+const SELECTOR_SYSTEM_INSTRUCTION =
+    'You are a selector-healing engine. Reply with exactly one CSS or Playwright ' +
+    'selector string and nothing else — no explanation, no reasoning, no markdown, ' +
+    'no code fences, no backticks, no surrounding quotes. If no element in the ' +
+    'provided HTML fits, reply with exactly: FAIL';
+
+/**
+ * Deterministic decoding temperature for selector healing.
+ *
+ * The default provider temperature (~1.0) samples a fresh continuation on every
+ * call, so an identical prompt intermittently produces a clean selector and
+ * intermittently a verbose refusal — the exact source of the "flaky" self-healing
+ * E2E tests. Pinning temperature to 0 removes that variance so healing is
+ * reproducible. Output length is intentionally left uncapped: some models spend
+ * part of their token budget on internal reasoning, and a tight cap can truncate
+ * the response before the selector is emitted.
+ */
+const SELECTOR_TEMPERATURE = 0;
+
+/**
  * Manages AI provider clients (OpenAI and Google Gemini), handles API key
  * rotation when keys are exhausted, and supports automatic provider failover.
  *
@@ -124,7 +152,14 @@ export class AIClientManager {
         const completion = await this.withTimeout(
             signal =>
                 this.openai!.chat.completions.create(
-                    { messages: [{ role: 'user', content: promptText }], model: this.modelName },
+                    {
+                        messages: [
+                            { role: 'system', content: SELECTOR_SYSTEM_INSTRUCTION },
+                            { role: 'user', content: promptText },
+                        ],
+                        model: this.modelName,
+                        temperature: SELECTOR_TEMPERATURE,
+                    },
                     { signal }
                 ),
             timeout,
@@ -149,7 +184,11 @@ export class AIClientManager {
 
     private async callGemini(promptText: string, timeout: number): Promise<AICallResult> {
         logger.info(`[AIClientManager] 📤 Sending request to Gemini (model: ${this.modelName})...`);
-        const model = this.gemini!.getGenerativeModel({ model: this.modelName });
+        const model = this.gemini!.getGenerativeModel({
+            model: this.modelName,
+            systemInstruction: SELECTOR_SYSTEM_INSTRUCTION,
+            generationConfig: { temperature: SELECTOR_TEMPERATURE },
+        });
         // Forward the AbortSignal to the SDK via SingleRequestOptions so a timeout
         // actually cancels the in-flight request client-side instead of leaking it
         // in the background.

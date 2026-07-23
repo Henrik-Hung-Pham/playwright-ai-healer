@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Page, Locator } from '@playwright/test';
-import { BasePage } from './BasePage.js';
+import { BasePage, isTransientNavigationError } from './BasePage.js';
 import { AutoHealer } from '../AutoHealer.js';
 import type { SiteHandler } from '../utils/SiteHandler.js';
 import { config } from '../config/index.js';
@@ -74,6 +74,72 @@ describe('BasePage', () => {
         it('should navigate to url', async () => {
             await basePage.goto('http://example.com');
             expect(mockPage.goto).toHaveBeenCalledWith('http://example.com');
+        });
+
+        it('should retry a transient connection error and succeed', async () => {
+            const err = new Error('page.goto: net::ERR_CONNECTION_REFUSED at http://example.com/');
+            vi.mocked(mockPage.goto!)
+                .mockRejectedValueOnce(err)
+                .mockResolvedValueOnce(null as never);
+
+            vi.useFakeTimers();
+            try {
+                const promise = basePage.goto('http://example.com');
+                await vi.advanceTimersByTimeAsync(1000);
+                await promise;
+            } finally {
+                vi.useRealTimers();
+            }
+
+            expect(mockPage.goto).toHaveBeenCalledTimes(2);
+        });
+
+        it('should give up after the max attempts on persistent transient errors', async () => {
+            const err = new Error('net::ERR_CONNECTION_REFUSED');
+            vi.mocked(mockPage.goto!).mockRejectedValue(err);
+
+            vi.useFakeTimers();
+            try {
+                const promise = basePage.goto('http://example.com');
+                const assertion = expect(promise).rejects.toThrow('ERR_CONNECTION_REFUSED');
+                await vi.advanceTimersByTimeAsync(3000); // 1000ms + 2000ms backoff
+                await assertion;
+            } finally {
+                vi.useRealTimers();
+            }
+
+            expect(mockPage.goto).toHaveBeenCalledTimes(3);
+        });
+
+        it('should not retry a non-transient navigation error', async () => {
+            const err = new Error('page.goto: Cannot navigate to invalid URL');
+            vi.mocked(mockPage.goto!).mockRejectedValue(err);
+
+            await expect(basePage.goto('not-a-url')).rejects.toThrow('invalid URL');
+            expect(mockPage.goto).toHaveBeenCalledTimes(1);
+        });
+    });
+
+    describe('isTransientNavigationError', () => {
+        it.each([
+            'page.goto: net::ERR_CONNECTION_REFUSED at https://books.toscrape.com/',
+            'net::ERR_CONNECTION_RESET',
+            'NS_ERROR_CONNECTION_REFUSED',
+            'page.goto: Timeout 30000ms exceeded.',
+        ])('treats %s as transient', message => {
+            expect(isTransientNavigationError(new Error(message))).toBe(true);
+        });
+
+        it.each(['Cannot navigate to invalid URL', 'net::ERR_ABORTED', 'some unrelated failure'])(
+            'treats %s as non-transient',
+            message => {
+                expect(isTransientNavigationError(new Error(message))).toBe(false);
+            }
+        );
+
+        it('handles non-Error values', () => {
+            expect(isTransientNavigationError('ERR_CONNECTION_REFUSED string')).toBe(true);
+            expect(isTransientNavigationError(undefined)).toBe(false);
         });
     });
 

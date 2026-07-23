@@ -6,6 +6,35 @@ import { config } from '../config/index.js';
 import { type SiteHandler, BooksToScrapeHandler } from '../utils/SiteHandler.js';
 
 /**
+ * Browser/network error fragments that indicate a transient, retryable
+ * navigation failure. The external sites under test occasionally refuse or
+ * reset a connection, or momentarily fail to resolve; those blips are worth a
+ * retry rather than an immediate test failure. Covers Chromium (`ERR_*`) and
+ * Firefox (`NS_ERROR_*`) naming, plus Playwright's navigation `Timeout`.
+ */
+const TRANSIENT_NAV_ERRORS = [
+    'ERR_CONNECTION_REFUSED',
+    'ERR_CONNECTION_RESET',
+    'ERR_CONNECTION_CLOSED',
+    'ERR_CONNECTION_TIMED_OUT',
+    'ERR_NETWORK_CHANGED',
+    'ERR_NAME_NOT_RESOLVED',
+    'ERR_TIMED_OUT',
+    'ERR_EMPTY_RESPONSE',
+    'ERR_SOCKET_NOT_CONNECTED',
+    'NS_ERROR_CONNECTION_REFUSED',
+    'NS_ERROR_NET_RESET',
+    'NS_ERROR_NET_TIMEOUT',
+    'Timeout',
+] as const;
+
+/** Does this navigation error look like a transient blip worth retrying? */
+export function isTransientNavigationError(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error);
+    return TRANSIENT_NAV_ERRORS.some(fragment => message.includes(fragment));
+}
+
+/**
  * BasePage - Abstract base class for all page objects.
  *
  * Provides overlay dismissal (cookie banners, security challenges), self-healing
@@ -46,6 +75,11 @@ export abstract class BasePage {
     >();
     /** Guards against registering more than one response listener per Page. */
     private static readonly _pageListenerAttached = new WeakSet<Page>();
+
+    /** Number of navigation attempts before giving up (initial try + retries). */
+    private static readonly NAV_MAX_ATTEMPTS = 3;
+    /** Base backoff between navigation retries, multiplied by the attempt number. */
+    private static readonly NAV_RETRY_BASE_DELAY_MS = 1000;
 
     /**
      * @param page - Playwright page instance.
@@ -106,12 +140,35 @@ export abstract class BasePage {
     }
 
     /**
-     * Navigate to the given URL.
+     * Navigate to the given URL, retrying transient network failures.
+     *
+     * The external sites under test (e.g. books.toscrape.com) occasionally
+     * refuse or reset connections. A bare `page.goto()` surfaces that as an
+     * immediate, unrecoverable `ERR_CONNECTION_REFUSED` and fails the whole
+     * test. Retrying a small number of times with a short linear backoff
+     * absorbs those blips without masking a genuinely unreachable target, which
+     * still throws after the final attempt. Non-transient errors (e.g. an
+     * invalid URL) are re-thrown immediately without retrying.
      *
      * @param url - Absolute URL to navigate to.
      */
     async goto(url: string) {
-        await this.page.goto(url);
+        for (let attempt = 1; attempt <= BasePage.NAV_MAX_ATTEMPTS; attempt++) {
+            try {
+                await this.page.goto(url);
+                return;
+            } catch (error) {
+                if (attempt === BasePage.NAV_MAX_ATTEMPTS || !isTransientNavigationError(error)) {
+                    throw error;
+                }
+                const delay = BasePage.NAV_RETRY_BASE_DELAY_MS * attempt;
+                logger.warn(
+                    `[BasePage] 🌐 Navigation to ${url} failed (attempt ${attempt}/${BasePage.NAV_MAX_ATTEMPTS}): ` +
+                        `${error instanceof Error ? error.message : String(error)}. Retrying in ${delay}ms...`
+                );
+                await new Promise(resolve => setTimeout(resolve, delay));
+            }
+        }
     }
 
     /**
