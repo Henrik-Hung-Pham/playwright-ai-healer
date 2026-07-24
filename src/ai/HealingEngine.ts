@@ -23,6 +23,55 @@ export function hasPositionalSuffix(selector: string): boolean {
 }
 
 /**
+ * Circuit breakers keyed by AI provider, shared by every `HealingEngine` in the
+ * process.
+ *
+ * This registry used to be an instance field. A `HealingEngine` is built per
+ * `AutoHealer`, which Playwright's `autoHealer` fixture builds **per test** — so
+ * the consecutive-failure count reset at every test boundary. With a threshold
+ * of 5 and rarely more than one or two heal attempts in a single test, the
+ * breaker could essentially never open: the component was correct in isolation
+ * and inert in practice.
+ *
+ * Hoisting to module scope lets failures accumulate across every test in a
+ * worker, which is the timescale on which a provider outage or an exhausted
+ * quota actually shows up.
+ *
+ * **Scope is the worker process.** Playwright runs workers as separate processes
+ * with no shared memory, so each detects an outage independently — with N
+ * workers, up to N × `failureThreshold` requests are spent before all of them
+ * have opened. Coordinating across workers would need out-of-process state and
+ * is deliberately out of scope; per-worker is a large improvement over per-test
+ * and costs nothing.
+ */
+const providerCircuitBreakers = new Map<string, CircuitBreaker>();
+
+/**
+ * Get (or lazily create) the shared circuit breaker for an AI provider.
+ *
+ * @param provider - Provider key, e.g. `'gemini'` or `'openai'`.
+ */
+export function getProviderCircuitBreaker(provider: string): CircuitBreaker {
+    let breaker = providerCircuitBreakers.get(provider);
+    if (!breaker) {
+        breaker = new CircuitBreaker();
+        providerCircuitBreakers.set(provider, breaker);
+    }
+    return breaker;
+}
+
+/**
+ * Discard all provider circuit breakers.
+ *
+ * **For testing only.** Module-scoped state persists across test cases within a
+ * file, so a test that drives a breaker open would otherwise leak that state
+ * into every test after it.
+ */
+export function resetProviderCircuitBreakers(): void {
+    providerCircuitBreakers.clear();
+}
+
+/**
  * Encapsulates the AI-powered selector healing logic.
  *
  * Given a failed selector and an error, `HealingEngine` captures a DOM snapshot,
@@ -44,13 +93,16 @@ export class HealingEngine {
 
     private clientManager: AIClientManager;
     private healingEvents: HealingEvent[] = [];
-    private readonly circuitBreakers: Map<string, CircuitBreaker> = new Map();
 
+    /**
+     * Resolve the circuit breaker for a provider.
+     *
+     * Delegates to the module-scoped {@link getProviderCircuitBreaker} registry
+     * so breakers are shared by every engine in the process rather than being
+     * scoped to one engine — and therefore, in practice, to one test.
+     */
     private getCircuitBreaker(provider: string): CircuitBreaker {
-        if (!this.circuitBreakers.has(provider)) {
-            this.circuitBreakers.set(provider, new CircuitBreaker());
-        }
-        return this.circuitBreakers.get(provider)!;
+        return getProviderCircuitBreaker(provider);
     }
 
     /**
