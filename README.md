@@ -174,6 +174,8 @@ src/
 │   ├── BasePage.ts            # Abstract base page
 │   ├── BooksHomePage.ts       # Books to Scrape home page; category nav, pagination
 │   └── BookDetailPage.ts      # Book detail page; title, price, breadcrumbs
+├── reporters/
+│   └── HealingReporter.ts     # Merges per-worker healing shards → healing-report.json
 └── utils/
     ├── Environment.ts         # Multi-env loader
     ├── Logger.ts              # Winston wrapper
@@ -260,6 +262,29 @@ const results = await healer.healAll([
 ]);
 // results: HealAllResult[] — per-operation outcome, healed selector, and error
 ```
+
+### 📊 Healing Report
+
+Every Playwright run now writes `test-results/healing-report.json` and prints a summary:
+
+```
+🏥 Healing report
+   Attempts      12 (11 healed, 1 failed)
+   Success rate  91.7%
+   Avg heal time 1840ms
+   Tokens used   9310
+   gemini        11/12 succeeded
+   ↳ #nonexistent-book-card-xyz → article.product_pod >> nth=0 (×2)
+   Written to test-results/healing-report.json
+```
+
+`HealingMetrics` is a per-process singleton, but Playwright runs tests in **worker processes** while reporters run in the **main process** — so a reporter cannot read the workers' in-memory events directly. The flow is:
+
+1. `HealingEngine` records each `HealingEvent` into its worker's `HealingMetrics`.
+2. The worker-scoped `healingMetricsShard` fixture flushes that worker's events to `test-results/healing-metrics/worker-<index>-<pid>.json` on teardown.
+3. `HealingReporter` merges every shard in `onEnd` and writes the run-wide report.
+
+CI uploads the JSON as a `healing-report-*` artifact per matrix shard. A malformed shard is skipped with a warning — a metrics artifact must never be the reason a green run goes red.
 
 ### 🎭 Healing Demo
 

@@ -154,3 +154,16 @@ jobs:
           name: playwright-report-${{ matrix.name }}
           path: playwright-report/
           retention-days: 7
+
+      # Aggregated healing metrics for this shard — success rate, average heal
+      # time, token spend, and per-provider breakdown. Written by HealingReporter
+      # from the per-worker shards. Uploaded separately from the HTML report so
+      # it can be downloaded and diffed without unpacking the full report.
+      - name: Upload healing report
+        uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: healing-report-${{ matrix.name }}
+          path: test-results/healing-report.json
+          if-no-files-found: ignore
+          retention-days: 7

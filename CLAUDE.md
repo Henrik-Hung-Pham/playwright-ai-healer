@@ -70,7 +70,9 @@ Test → BasePage.safeClick/safeFill
 | `src/pages/BasePage.ts`       | Abstract base for all page objects; wraps interactions with overlay dismissal, `AutoHealer` delegation, and Vercel security challenge detection    |
 | `src/pages/BooksHomePage.ts`  | Home page entry point; `navigateToCategory()`, `clickBook()`, `getBookCount()`, pagination support                                                 |
 | `src/pages/BookDetailPage.ts` | Book detail page; `getTitle()`, `getPrice()`, `getBreadcrumbs()`                                                                                   |
-| `tests/fixtures/base.ts`      | Playwright fixtures providing `autoHealer` and `booksPage` to E2E tests                                                                            |
+| `src/utils/HealingMetrics.ts` | Aggregates `HealingEvent`s; `buildReport()` is static so the reporter can merge events from worker processes                                       |
+| `src/reporters/HealingReporter.ts` | Playwright reporter; merges per-worker healing shards into `test-results/healing-report.json`                                                 |
+| `tests/fixtures/base.ts`      | Playwright fixtures providing `autoHealer` and `booksPage`, plus the worker-scoped `healingMetricsShard` flush                                     |
 
 ### Environment Configuration
 

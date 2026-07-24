@@ -3,6 +3,70 @@ import * as path from 'path';
 import { logger } from './Logger.js';
 import type { HealingEvent, HealingReport, ProviderStats, HealedSelectorEntry } from '../types.js';
 
+// ── Pure aggregation helpers ─────────────────────────────────────────────────
+//
+// Kept free of instance state so the same logic serves both the per-process
+// singleton and `HealingMetrics.buildReport()`, which the Playwright reporter
+// uses to aggregate events collected in *other* processes (worker shards).
+
+/** Success rate as a percentage (0-100); 0 when there are no events. */
+function computeSuccessRate(events: readonly HealingEvent[]): number {
+    if (events.length === 0) return 0;
+    return (events.filter(e => e.success).length / events.length) * 100;
+}
+
+/** Mean healing duration in milliseconds; 0 when there are no events. */
+function computeAverageHealTime(events: readonly HealingEvent[]): number {
+    if (events.length === 0) return 0;
+    return events.reduce((sum, e) => sum + e.durationMs, 0) / events.length;
+}
+
+/** Attempt/success counts keyed by provider. */
+function computeProviderBreakdown(events: readonly HealingEvent[]): Record<string, ProviderStats> {
+    const breakdown: Record<string, ProviderStats> = {};
+    for (const event of events) {
+        const stats = (breakdown[event.provider] ??= { attempts: 0, successes: 0 });
+        stats.attempts++;
+        if (event.success) stats.successes++;
+    }
+    return breakdown;
+}
+
+/** Successfully healed selectors, most frequently healed first. */
+function computeSelectorBreakdown(events: readonly HealingEvent[]): HealedSelectorEntry[] {
+    const selectorMap = new Map<string, { healed: string; count: number }>();
+    for (const event of events) {
+        if (!event.success || !event.result) continue;
+        const existing = selectorMap.get(event.originalSelector);
+        if (existing) {
+            existing.count++;
+            existing.healed = event.result.selector;
+        } else {
+            selectorMap.set(event.originalSelector, { healed: event.result.selector, count: 1 });
+        }
+    }
+
+    return Array.from(selectorMap, ([original, data]) => ({
+        original,
+        healed: data.healed,
+        count: data.count,
+    })).sort((a, b) => b.count - a.count);
+}
+
+/** Total token spend and its per-provider breakdown. */
+function computeTokenUsage(events: readonly HealingEvent[]): { total: number; byProvider: Record<string, number> } {
+    let total = 0;
+    const byProvider: Record<string, number> = {};
+
+    for (const event of events) {
+        if (!event.tokensUsed) continue;
+        total += event.tokensUsed.total;
+        byProvider[event.provider] = (byProvider[event.provider] ?? 0) + event.tokensUsed.total;
+    }
+
+    return { total, byProvider };
+}
+
 /**
  * HealingMetrics - Singleton collector for healing event metrics.
  *
@@ -52,9 +116,7 @@ export class HealingMetrics {
      * @returns Success rate percentage, or 0 if no events recorded
      */
     public getSuccessRate(): number {
-        if (this.events.length === 0) return 0;
-        const successes = this.events.filter(e => e.success).length;
-        return (successes / this.events.length) * 100;
+        return computeSuccessRate(this.events);
     }
 
     /**
@@ -63,9 +125,7 @@ export class HealingMetrics {
      * @returns Average heal time in ms, or 0 if no events recorded
      */
     public getAverageHealTime(): number {
-        if (this.events.length === 0) return 0;
-        const totalMs = this.events.reduce((sum, e) => sum + e.durationMs, 0);
-        return totalMs / this.events.length;
+        return computeAverageHealTime(this.events);
     }
 
     /**
@@ -74,19 +134,7 @@ export class HealingMetrics {
      * @returns Map of provider name to attempt/success counts
      */
     public getProviderBreakdown(): Record<string, ProviderStats> {
-        const breakdown: Record<string, ProviderStats> = {};
-        for (const event of this.events) {
-            const provider = event.provider;
-            if (!breakdown[provider]) {
-                breakdown[provider] = { attempts: 0, successes: 0 };
-            }
-            const stats = breakdown[provider];
-            stats.attempts++;
-            if (event.success) {
-                stats.successes++;
-            }
-        }
-        return breakdown;
+        return computeProviderBreakdown(this.events);
     }
 
     /**
@@ -95,33 +143,7 @@ export class HealingMetrics {
      * @returns Array of selector healing entries
      */
     public getSelectorBreakdown(): HealedSelectorEntry[] {
-        const selectorMap = new Map<string, { healed: string; count: number }>();
-        for (const event of this.events) {
-            if (event.success && event.result) {
-                const key = event.originalSelector;
-                const existing = selectorMap.get(key);
-                if (existing) {
-                    existing.count++;
-                    existing.healed = event.result.selector;
-                } else {
-                    selectorMap.set(key, {
-                        healed: event.result.selector,
-                        count: 1,
-                    });
-                }
-            }
-        }
-
-        const entries: HealedSelectorEntry[] = [];
-        for (const [original, data] of selectorMap) {
-            entries.push({
-                original,
-                healed: data.healed,
-                count: data.count,
-            });
-        }
-
-        return entries.sort((a, b) => b.count - a.count);
+        return computeSelectorBreakdown(this.events);
     }
 
     /**
@@ -133,18 +155,35 @@ export class HealingMetrics {
         total: number;
         byProvider: Record<string, number>;
     } {
-        let total = 0;
-        const byProvider: Record<string, number> = {};
+        return computeTokenUsage(this.events);
+    }
 
-        for (const event of this.events) {
-            if (event.tokensUsed) {
-                total += event.tokensUsed.total;
-                const provider = event.provider;
-                byProvider[provider] = (byProvider[provider] ?? 0) + event.tokensUsed.total;
-            }
-        }
+    /**
+     * Build a report from an arbitrary set of healing events.
+     *
+     * Exposed as a static so callers outside this process's singleton can
+     * aggregate events they collected elsewhere — specifically `HealingReporter`,
+     * which runs in Playwright's main process and merges the per-worker shards
+     * that each worker's `HealingMetrics` singleton flushed to disk.
+     *
+     * @param events - Events to aggregate. An empty array yields a zeroed report.
+     */
+    public static buildReport(events: readonly HealingEvent[]): HealingReport {
+        const successCount = events.filter(e => e.success).length;
+        const tokenUsage = computeTokenUsage(events);
 
-        return { total, byProvider };
+        return {
+            totalEvents: events.length,
+            successCount,
+            failureCount: events.length - successCount,
+            successRate: computeSuccessRate(events),
+            averageHealTimeMs: computeAverageHealTime(events),
+            totalTokensUsed: tokenUsage.total,
+            providerStats: computeProviderBreakdown(events),
+            topHealedSelectors: computeSelectorBreakdown(events),
+            tokenUsage,
+            generatedAt: new Date().toISOString(),
+        };
     }
 
     /**
@@ -153,22 +192,7 @@ export class HealingMetrics {
      * @returns A typed `HealingReport` object
      */
     public generateReport(): HealingReport {
-        const successCount = this.events.filter(e => e.success).length;
-        const failureCount = this.events.length - successCount;
-        const tokenUsage = this.getTokenUsage();
-
-        return {
-            totalEvents: this.events.length,
-            successCount,
-            failureCount,
-            successRate: this.getSuccessRate(),
-            averageHealTimeMs: this.getAverageHealTime(),
-            totalTokensUsed: tokenUsage.total,
-            providerStats: this.getProviderBreakdown(),
-            topHealedSelectors: this.getSelectorBreakdown(),
-            tokenUsage,
-            generatedAt: new Date().toISOString(),
-        };
+        return HealingMetrics.buildReport(this.events);
     }
 
     /**
