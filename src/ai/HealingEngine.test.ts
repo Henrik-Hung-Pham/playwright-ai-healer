@@ -122,6 +122,27 @@ describe('HealingEngine', () => {
         expect(result).toBeNull();
     });
 
+    it('rejects an unparseable selector instead of letting locator.count() throw', async () => {
+        // A verbose model reply can survive parsing and validation as something
+        // that merely looks selector-shaped. page.locator() then throws
+        // "Unexpected token … while parsing css selector", which used to escape
+        // the scoring path and abort the heal with an opaque error. Found by
+        // tests/benchmark/healing-accuracy.spec.ts.
+        mockParseAIResponse.mockReturnValue('*   Check uniqueness: Only one element has');
+        page = {
+            locator: vi.fn(() => {
+                throw new Error('Unexpected token " " while parsing css selector');
+            }),
+        } as unknown as Page;
+
+        const result = await engine.heal(page, '.qty-input', new Error('not found'));
+
+        expect(result).toBeNull();
+        // The failure is recorded as an ordinary unsuccessful heal, not a crash.
+        const events = engine.getHealingEvents();
+        expect(events.at(-1)?.success).toBe(false);
+    });
+
     // ── Ambiguous-selector disambiguation ─────────────────────────────────────
 
     it('disambiguates an ambiguous selector by pinning it to the first match', async () => {

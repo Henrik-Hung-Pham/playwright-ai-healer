@@ -139,6 +139,20 @@ it('should heal broken selector using AI', async () => {
 - Use actual Playwright browsers when possible
 - Test cross-browser compatibility
 
+### Healing Accuracy Benchmark
+
+```bash
+npm run test:healing-benchmark
+```
+
+`tests/benchmark/healing-accuracy.spec.ts` measures whether healing repairs a selector to the **correct** element, not merely to one that resolves. Each case renders a fixture DOM in which exactly one element is the right answer, marked `data-benchmark-target="true"`, and asserts the healed selector resolves to it.
+
+Run it when you change anything on the healing path — the prompt (`HealingPrompt.ts`), the parser (`ResponseParser.ts`), the scorer (`SelectorScorer.ts`), the validator, or the default model. Those changes can silently degrade accuracy while every other test stays green, because the ordinary suite only checks that healing returned *something usable*.
+
+Adding a case: append to `CASES`, mark the correct element with `data-benchmark-target="true"`, and keep the marker off the `data-test*` / `data-cy*` prefixes — otherwise `DOMSerializer` forwards it into the prompt and hands the model the answer. The first test in the file guards this.
+
+It runs on the **nightly** CI schedule rather than on PRs: it spends live AI quota per case, and a regression reflects the model or prompt rather than any one PR's diff.
+
 ## 🔒 Security Best Practices
 
 - Never commit API keys or secrets
