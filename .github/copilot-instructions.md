@@ -120,11 +120,14 @@ The GitHub Actions workflow (`.github/workflows/playwright.yml`) runs on:
 **Workflow steps:**
 
 1. Install dependencies with `npm ci` (not `npm install`)
-2. Run `npm audit --audit-level=high` and `npm run lint`
+2. Run `npm run typecheck`, `npm run lint`, and `npm run format:check`
 3. Run unit tests with coverage
 4. Install Playwright browsers (cached per engine)
 5. Run Playwright E2E tests on all 9 browser configurations, including Self-Healing tests on every browser
 6. Upload test reports as artifacts
+
+A second workflow (`.github/workflows/audit.yml`, **Dependency Audit**) runs `npm audit --audit-level=high` on the
+nightly schedule, on manual trigger, and on PRs that change `package.json` or `package-lock.json`.
 
 **Environment Requirements for CI:**
 

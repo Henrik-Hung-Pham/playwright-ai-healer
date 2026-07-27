@@ -112,9 +112,13 @@ GitHub Actions (`.github/workflows/playwright.yml`) runs on push/PR to `main`:
 3. Uploads HTML reports as artifacts
    Uses `npm ci` (not `npm install`) and requires `GEMINI_API_KEY` secret.
 
-`npm audit --audit-level=high` runs in a separate `audit` job gated to the nightly
-schedule and manual `workflow_dispatch` — **not** on PRs. Advisories publish on the
-ecosystem's schedule, so gating PRs on them turns unrelated branches red. Run
+A second workflow (`.github/workflows/audit.yml`, **Dependency Audit**) runs
+`npm audit --audit-level=high` on the nightly schedule, on manual
+`workflow_dispatch`, and on PRs that touch `package.json` / `package-lock.json` —
+but **not** on PRs that leave the dependency graph alone. Advisories publish on the
+ecosystem's schedule, so gating every PR on them turns unrelated branches red;
+keeping the audit in its own workflow also means a fresh CVE shows up as its own
+red check instead of making "the pipeline is red" ambiguous. Run
 `npm audit --audit-level=high` locally before pushing a dependency change.
 
 ## Agents
