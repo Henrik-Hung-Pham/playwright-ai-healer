@@ -196,12 +196,19 @@ tests/
 
 ## 🔄 CI/CD
 
-GitHub Actions workflow runs on every push:
+**Playwright Tests** (`.github/workflows/playwright.yml`) runs on every push and PR to `main`:
 
 - ✅ Unit tests with code coverage reporting
 - ✅ E2E tests on **all 9 browser configurations** (matrix strategy), including Self-Healing tests on every browser
 - ✅ HTML report artifacts
 - ✅ Automatic retries for flaky tests
+
+**Dependency Audit** (`.github/workflows/audit.yml`) is a separate pipeline running `npm audit --audit-level=high`:
+
+- 🌙 Nightly (06:00 UTC) and on manual `workflow_dispatch`
+- 📦 On PRs that change `package.json` or `package-lock.json` — but not on PRs that leave dependencies untouched
+
+Advisories publish on the ecosystem's schedule rather than the project's, so gating every PR on them would turn unrelated branches red. Keeping the audit in its own workflow also means a newly-disclosed CVE surfaces as its own red check, distinct from a genuine test failure.
 
 ## 🧬 Architecture — How Self-Healing Works
 

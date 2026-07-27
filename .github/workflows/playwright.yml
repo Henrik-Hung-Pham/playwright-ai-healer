@@ -12,36 +12,10 @@ on:
   workflow_dispatch:
     # Allow manual trigger from GitHub Actions UI
 
+# The dependency audit lives in its own workflow (`.github/workflows/audit.yml`)
+# so that a newly-published advisory reports as its own check rather than turning
+# this suite red for a reason unrelated to any test.
 jobs:
-  # Dependency advisories publish on the ecosystem's schedule, not ours, so a
-  # newly-disclosed CVE in a transitive dependency turns every open PR red for
-  # reasons unrelated to its diff — twice in one day, in practice. Auditing on the
-  # nightly schedule (and on demand) keeps the signal within a day of disclosure
-  # without blocking unrelated feature work.
-  #
-  # Deliberately a standalone job rather than a step in unit-tests: e2e-tests
-  # declares `needs: unit-tests`, so folding the audit back in would let a fresh
-  # advisory suppress the entire nightly E2E matrix.
-  audit:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v6
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version-file: '.nvmrc'
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Audit dependencies
-        run: npm audit --audit-level=high
-
   # Measures whether healing repairs a selector to the *correct* element, not
   # merely to one that resolves. Gated to the nightly schedule and manual runs
   # for two reasons: it spends live AI quota on every case, and a regression is

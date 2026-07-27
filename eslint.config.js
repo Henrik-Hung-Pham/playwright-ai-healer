@@ -38,6 +38,17 @@ export default tseslint.config(
         },
     },
     {
-        ignores: ['node_modules/', 'dist/', '*.js', 'playwright-report/', 'test-results/', 'coverage/', '.claude/'],
+        // `.claude/` and `.gitnexus/` are git-ignored tool scratch directories — generated
+        // CommonJS and agent worktrees that are not part of this project's source.
+        ignores: [
+            'node_modules/',
+            'dist/',
+            '*.js',
+            'playwright-report/',
+            'test-results/',
+            'coverage/',
+            '.claude/',
+            '.gitnexus/',
+        ],
     }
 );
