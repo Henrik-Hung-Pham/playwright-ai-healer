@@ -42,7 +42,8 @@ export default tseslint.config(
         // config does not read .gitignore, so they must be listed explicitly —
         // otherwise `npx gitnexus analyze` (which CLAUDE.md tells us to run) emits
         // a CommonJS .gitnexus/run.cjs that fails the TypeScript-oriented rules and
-        // breaks `npm run validate` on every branch.
+        // breaks `npm run validate` on every branch. `.claude/worktrees/` likewise
+        // pollutes the tsconfig project parser.
         ignores: [
             'node_modules/',
             'dist/',
@@ -51,7 +52,7 @@ export default tseslint.config(
             'test-results/',
             'coverage/',
             '.claude/',
-            '.gitnexus/'
+            '.gitnexus/',
         ],
     }
 );
