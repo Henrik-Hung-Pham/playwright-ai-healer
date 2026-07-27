@@ -1,0 +1,45 @@
+name: Dependency Audit
+
+# Dependency advisories publish on the ecosystem's schedule, not ours, so a
+# newly-disclosed CVE in a transitive dependency turns every open PR red for
+# reasons unrelated to its diff — twice in one day, in practice. Auditing on the
+# nightly schedule keeps the signal within a day of disclosure without blocking
+# unrelated feature work.
+#
+# This lives in its own workflow rather than as a job in `Playwright Tests` so
+# that a fresh advisory reports as its own red check, distinct from a genuine
+# test failure — the previous arrangement made "main is red" ambiguous between
+# "the suite broke" and "the ecosystem published a CVE overnight".
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  # A PR that changes the dependency graph is the one case where auditing on the
+  # PR path is fair: the advisory is about that diff, and the author can act on it.
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'package.json'
+      - 'package-lock.json'
+  workflow_dispatch:
+    # Allow manual trigger from GitHub Actions UI
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Audit dependencies
+        run: npm audit --audit-level=high
