@@ -256,6 +256,31 @@ async click(selector: string) {
 
 _Note: If the primary AI Provider (e.g. Gemini) hits a 4xx Rate Limit error, the `AutoHealer` automatically detects the quota failure and falls back to an alternate AI Provider (e.g. OpenAI) if configured!_
 
+### 🧭 Keeping page objects on the healing path
+
+`safeClick()` accepts either a **selector string** or a pre-built Playwright **`Locator`**. Only the string form can heal — a `Locator` has already resolved to an element and carries no selector text for the AI to repair, so `BasePage` clicks it directly and `AutoHealer` never runs.
+
+```typescript
+// ❌ Bypasses healing — the Locator is clicked directly
+const link = this.page.locator(categoryLink).filter({ hasText: 'Mystery' }).first();
+await this.safeClick(link);
+
+// ✅ Heals — and persists the repaired selector, because a bare key round-trips to the store
+await this.safeClick('booksToScrape.nextPageButton');
+
+// ✅ Heals — compose from the resolved value when you need an index, chain, or text filter
+await this.safeClick(`${this.selectorFor('booksToScrape.bookTitle')} >> nth=${index}`);
+```
+
+Two helpers on `BasePage` support this:
+
+| Helper                              | Use for                                                                                                                           |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `selectorFor(key)`                  | Resolve a dot-path key to its current selector **at call time**, so a selector healed earlier in the same run is used immediately |
+| `safeWaitForSelector(key, options)` | The read path — waits through `AutoHealer`, so assertions on a title or price heal instead of failing on a stale selector         |
+
+**Persistence caveat:** a repaired selector is written back to the store only when a **bare key** is passed. A composed string (`… >> nth=2`) still heals, but is not persisted — the healed answer describes one pinned element, not the reusable base selector, so writing it back to the key would corrupt the store.
+
 ### ⚡ Concurrent Healing (`healAll`)
 
 Heal multiple failing selectors in one call — AI requests fire in parallel, Playwright interactions stay sequential:
