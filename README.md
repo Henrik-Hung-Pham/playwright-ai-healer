@@ -187,6 +187,8 @@ tests/
 ├── books-to-scrape.spec.ts    # E2E tests
 ├── healing-demo.spec.ts       # Self-healing demo tests
 ├── fixtures/base.ts           # Playwright fixtures
+├── benchmark/                 # Healing accuracy benchmark (nightly CI only)
+│   └── healing-accuracy.spec.ts
 └── unit/                      # Unit tests
     ├── autohealer-core.test.ts
     └── autohealer-error-handling.test.ts
@@ -292,6 +294,29 @@ const results = await healer.healAll([
 ]);
 // results: HealAllResult[] — per-operation outcome, healed selector, and error
 ```
+
+### 🎯 Healing Accuracy Benchmark
+
+```bash
+npm run test:healing-benchmark
+```
+
+The rest of the suite can only show that healing **returned something usable** — `HealingEvent.success` is true when the AI's selector parses, validates, and resolves to exactly one element. None of that establishes it resolved to the **right** element: a model replying with any unique node on the page scores a perfect success rate.
+
+The benchmark supplies the missing oracle. Each case renders a fixture DOM via `page.setContent()` in which exactly one element is the correct answer, marked `data-benchmark-target="true"`, then asks the healer to repair a selector that no longer matches. The assertion is on **identity** — the healed selector must resolve to the marked element:
+
+| Case                  | Mutation                                      |
+| --------------------- | --------------------------------------------- |
+| Renamed id            | `#submit-order-btn` → `#place-order-btn`      |
+| Renamed class         | `.qty-input` → `.product-quantity`            |
+| Renamed `data-testid` | `promo-code` → `discount-code`                |
+| Restructured DOM      | button no longer a direct child of `.actions` |
+
+The marker is **invisible to the model**: `DOMSerializer` forwards only its `FULL_ATTRS` allowlist plus `data-test*` / `data-cy*` prefixes, and `data-benchmark-target` matches neither. The first test in the file asserts that property directly, so the benchmark fails loudly if a future serializer change starts leaking the answer.
+
+Fixtures are synthetic rather than fetched from books.toscrape.com — the live site never changes, so it cannot produce the selector drift this benchmark exists to measure.
+
+Runs on the **nightly CI schedule** and on demand, not on PRs: it spends live AI quota per case, and a regression reflects the model or prompt rather than any one PR's diff.
 
 ### 🎭 Healing Demo
 
