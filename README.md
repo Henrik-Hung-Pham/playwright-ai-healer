@@ -109,6 +109,8 @@ DOM_SNAPSHOT_CHAR_LIMIT=12000  # Max chars of DOM sent to AI; must be >= 100 (se
 HEALING_FAILURE_MODE=fail      # 'fail' (default) throws when healing cannot produce a usable
                                # selector; 'skip' calls test.skip() instead. Prefer 'fail' — a
                                # skipped test reports green, hiding a healer that never worked.
+SELECTOR_QUARANTINE_THRESHOLD=3  # Consecutive post-heal failures before a healed selector is
+                                 # rolled back to the value it replaced. Must be >= 1.
 
 # Locator Storage Backend
 LOCATOR_STORE=file    # 'file' (default, JSON + lockfile) or 'sqlite' (ACID SQLite)
@@ -180,7 +182,8 @@ src/
     ├── CircuitBreaker.ts      # Per-provider circuit breaker (opens after 5 failures)
     ├── HealingMetrics.ts      # Per-key selector failure/heal event tracking
     ├── LocatorAdapter.ts      # Pluggable storage: FileAdapter | SQLiteAdapter
-    ├── LocatorManager.ts      # Selector persistence (facade over LocatorAdapter) + stability metrics
+    ├── LocatorManager.ts      # Selector persistence (facade over LocatorAdapter) + stability
+    │                          #   metrics + rollback of healed selectors that keep failing
     └── SiteHandler.ts         # Overlay dismissal (Strategy pattern)
 
 tests/
@@ -293,6 +296,34 @@ const results = await healer.healAll([
     { action: 'fill', selectorOrKey: 'home.searchInput', value: 'laptop' },
 ]);
 // results: HealAllResult[] — per-operation outcome, healed selector, and error
+```
+
+### 🔙 Selector Quarantine — closing the feedback loop
+
+A healed selector is accepted when it parses, validates, and resolves to exactly one element. None of that proves it resolves to the **intended** element, so a confidently wrong heal can be persisted to the locator store and reused by every later run.
+
+Quarantine bounds that damage. `recordSelectorHealed()` stores the selector each heal replaced, and once a healed selector has failed `SELECTOR_QUARANTINE_THRESHOLD` times in a row (default 3), `recordSelectorFailure()` rolls the store back to that value and records what it rejected:
+
+```jsonc
+// src/config/metrics.json
+{
+    "booksToScrape.bookTitle": {
+        "failureCount": 0,
+        "quarantinedSelector": ".product h2 a", // rejected after 3 failures
+        "quarantinedAt": "2026-07-30T14:02:11.884Z",
+        "quarantineCount": 1, // chronic keys stand out
+    },
+}
+```
+
+After a rollback the heal is cleared, so failures of the restored selector do **not** accrue toward another quarantine — those are the original defect, not a bad repair. The key stays fully healable: the next failure triggers a fresh heal. That is deliberate — permanently disabling healing for a key would trade a wrong selector for a dead one.
+
+`recordSelectorFailure()` returns a `SelectorFailureOutcome`, so a rollback is reported rather than applied silently:
+
+```typescript
+const outcome = await LocatorManager.getInstance().recordSelectorFailure('booksToScrape.bookTitle');
+// { recorded: true, failureCount: 3, quarantined: true,
+//   revertedTo: '.product_main h1', quarantinedSelector: '.product h2 a' }
 ```
 
 ### 🎯 Healing Accuracy Benchmark
