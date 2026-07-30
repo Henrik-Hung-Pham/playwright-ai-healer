@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { loadEnvironment } from '../utils/Environment.js';
 import { logger } from '../utils/Logger.js';
 import { buildHealingPrompt } from '../ai/HealingPrompt.js';
+import type { AIProvider } from '../types.js';
 
 const categoriesData = {
     travel: { label: 'Travel' },
@@ -57,7 +58,10 @@ type AppConfig = {
     env: string;
     app: { baseUrl: string };
     ai: {
-        provider: string;
+        // Narrowed to the union rather than `string`: the Zod schema already
+        // guarantees one of the two, and consumers (AutoHealer's default
+        // provider, resolveAIProvider) need the narrow type to use it directly.
+        provider: AIProvider;
         gemini: { apiKey: string | undefined; modelName: string };
         openai: { apiKeys: string[]; modelName: string; apiKey: string | undefined };
         healing: {
