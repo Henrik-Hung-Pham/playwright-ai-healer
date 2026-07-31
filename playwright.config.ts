@@ -36,8 +36,13 @@ export default defineConfig({
     workers: process.env['CI'] ? 2 : 4,
     fullyParallel: true,
 
-    // Generate HTML report for CI artifacts
-    reporter: [['list'], ['html', { outputFolder: 'playwright-report', open: 'never' }]],
+    // Generate HTML report for CI artifacts. HealingReporter merges the
+    // per-worker healing-metric shards into test-results/healing-report.json.
+    reporter: [
+        ['list'],
+        ['html', { outputFolder: 'playwright-report', open: 'never' }],
+        ['./src/reporters/HealingReporter.ts'],
+    ],
 
     use: {
         headless: process.env['HEADLESS'] !== 'false',
