@@ -189,6 +189,8 @@ tests/
 ├── books-to-scrape.spec.ts    # E2E tests
 ├── healing-demo.spec.ts       # Self-healing demo tests
 ├── fixtures/base.ts           # Playwright fixtures
+├── benchmark/                 # Healing accuracy benchmark (nightly CI only)
+│   └── healing-accuracy.spec.ts
 └── unit/                      # Unit tests
     ├── autohealer-core.test.ts
     └── autohealer-error-handling.test.ts
@@ -258,6 +260,31 @@ async click(selector: string) {
 
 _Note: If the primary AI Provider (e.g. Gemini) hits a 4xx Rate Limit error, the `AutoHealer` automatically detects the quota failure and falls back to an alternate AI Provider (e.g. OpenAI) if configured!_
 
+### 🧭 Keeping page objects on the healing path
+
+`safeClick()` accepts either a **selector string** or a pre-built Playwright **`Locator`**. Only the string form can heal — a `Locator` has already resolved to an element and carries no selector text for the AI to repair, so `BasePage` clicks it directly and `AutoHealer` never runs.
+
+```typescript
+// ❌ Bypasses healing — the Locator is clicked directly
+const link = this.page.locator(categoryLink).filter({ hasText: 'Mystery' }).first();
+await this.safeClick(link);
+
+// ✅ Heals — and persists the repaired selector, because a bare key round-trips to the store
+await this.safeClick('booksToScrape.nextPageButton');
+
+// ✅ Heals — compose from the resolved value when you need an index, chain, or text filter
+await this.safeClick(`${this.selectorFor('booksToScrape.bookTitle')} >> nth=${index}`);
+```
+
+Two helpers on `BasePage` support this:
+
+| Helper                              | Use for                                                                                                                           |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `selectorFor(key)`                  | Resolve a dot-path key to its current selector **at call time**, so a selector healed earlier in the same run is used immediately |
+| `safeWaitForSelector(key, options)` | The read path — waits through `AutoHealer`, so assertions on a title or price heal instead of failing on a stale selector         |
+
+**Persistence caveat:** a repaired selector is written back to the store only when a **bare key** is passed. A composed string (`… >> nth=2`) still heals, but is not persisted — the healed answer describes one pinned element, not the reusable base selector, so writing it back to the key would corrupt the store.
+
 ### ⚡ Concurrent Healing (`healAll`)
 
 Heal multiple failing selectors in one call — AI requests fire in parallel, Playwright interactions stay sequential:
@@ -292,6 +319,29 @@ Every Playwright run now writes `test-results/healing-report.json` and prints a 
 3. `HealingReporter` merges every shard in `onEnd` and writes the run-wide report.
 
 CI uploads the JSON as a `healing-report-*` artifact per matrix shard. A malformed shard is skipped with a warning — a metrics artifact must never be the reason a green run goes red.
+
+### 🎯 Healing Accuracy Benchmark
+
+```bash
+npm run test:healing-benchmark
+```
+
+The rest of the suite can only show that healing **returned something usable** — `HealingEvent.success` is true when the AI's selector parses, validates, and resolves to exactly one element. None of that establishes it resolved to the **right** element: a model replying with any unique node on the page scores a perfect success rate.
+
+The benchmark supplies the missing oracle. Each case renders a fixture DOM via `page.setContent()` in which exactly one element is the correct answer, marked `data-benchmark-target="true"`, then asks the healer to repair a selector that no longer matches. The assertion is on **identity** — the healed selector must resolve to the marked element:
+
+| Case                  | Mutation                                      |
+| --------------------- | --------------------------------------------- |
+| Renamed id            | `#submit-order-btn` → `#place-order-btn`      |
+| Renamed class         | `.qty-input` → `.product-quantity`            |
+| Renamed `data-testid` | `promo-code` → `discount-code`                |
+| Restructured DOM      | button no longer a direct child of `.actions` |
+
+The marker is **invisible to the model**: `DOMSerializer` forwards only its `FULL_ATTRS` allowlist plus `data-test*` / `data-cy*` prefixes, and `data-benchmark-target` matches neither. The first test in the file asserts that property directly, so the benchmark fails loudly if a future serializer change starts leaking the answer.
+
+Fixtures are synthetic rather than fetched from books.toscrape.com — the live site never changes, so it cannot produce the selector drift this benchmark exists to measure.
+
+Runs on the **nightly CI schedule** and on demand, not on PRs: it spends live AI quota per case, and a regression reflects the model or prompt rather than any one PR's diff.
 
 ### 🎭 Healing Demo
 

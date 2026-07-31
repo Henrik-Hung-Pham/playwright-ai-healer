@@ -16,6 +16,49 @@ on:
 # so that a newly-published advisory reports as its own check rather than turning
 # this suite red for a reason unrelated to any test.
 jobs:
+  # Measures whether healing repairs a selector to the *correct* element, not
+  # merely to one that resolves. Gated to the nightly schedule and manual runs
+  # for two reasons: it spends live AI quota on every case, and a regression is
+  # a property of the model/prompt rather than of any one PR's diff — so gating
+  # PRs on it would turn unrelated branches red when a provider has a bad day.
+  #
+  # Runs in a single browser: it measures selector accuracy, not browser
+  # behaviour, so the nine-project matrix would multiply cost for identical results.
+  healing-benchmark:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      GEMINI_MODEL: ${{ secrets.GEMINI_MODEL }}
+      TEST_ENV: prod
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run healing accuracy benchmark
+        run: npm run test:healing-benchmark
+
+      - name: Upload benchmark report
+        uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: healing-benchmark-report
+          path: playwright-report/
+          retention-days: 7
+
   unit-tests:
     runs-on: ubuntu-24.04
     timeout-minutes: 5

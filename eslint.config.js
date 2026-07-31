@@ -38,8 +38,12 @@ export default tseslint.config(
         },
     },
     {
-        // `.claude/` and `.gitnexus/` are git-ignored tool scratch directories — generated
-        // CommonJS and agent worktrees that are not part of this project's source.
+        // Generated/tooling directories. These are git-ignored, but ESLint's flat
+        // config does not read .gitignore, so they must be listed explicitly —
+        // otherwise `npx gitnexus analyze` (which CLAUDE.md tells us to run) emits
+        // a CommonJS .gitnexus/run.cjs that fails the TypeScript-oriented rules and
+        // breaks `npm run validate` on every branch. `.claude/worktrees/` likewise
+        // pollutes the tsconfig project parser.
         ignores: [
             'node_modules/',
             'dist/',

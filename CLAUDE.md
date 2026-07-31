@@ -101,9 +101,16 @@ Environment is selected by `TEST_ENV` variable (`dev`/`staging`/`prod`). The con
 ### Adding a New Page Object
 
 1. Extend `BasePage` in `src/pages/`
-2. Use `this.safeClick()` / `this.safeFill()` for interactions (delegates to `AutoHealer` if available)
+2. Use `this.safeClick()` / `this.safeFill()` / `this.safeWaitForSelector()` for interactions (delegates to `AutoHealer` if available)
 3. Add selectors to `src/config/locators.json` with dot-path keys
-4. Access via `LocatorManager.getInstance().getLocator('page.elementKey')`
+4. **Always pass a selector _string_, never a pre-built `Locator`.** The `Locator` overload of
+   `safeClick()` bypasses `AutoHealer` entirely — a resolved `Locator` carries no selector text
+   for the AI to repair. Pass a bare key when the target is a single element (this also lets a
+   repaired selector be persisted back to the store); use `this.selectorFor(key)` to compose when
+   an index, chain, or text filter is needed (`` `${this.selectorFor(k)} >> nth=2` ``) — that
+   still heals, but is not persisted.
+5. Resolve keys via `this.selectorFor('page.elementKey')` rather than importing `locators.json`,
+   so a selector healed earlier in the same run is picked up immediately.
 
 ### CI
 
@@ -138,81 +145,46 @@ red check instead of making "the pipeline is red" ambiguous. Run
 
 <!-- gitnexus:start -->
 
-## GitNexus — Code Intelligence
+# GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **self-healing-agent** (211 symbols, 485 relationships, 20 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **playwright-ai-healer** (526 symbols, 1819 relationships, 26 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
-> If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
+> Index stale? Run `node .gitnexus/run.cjs analyze` from the project root — it auto-selects an available runner. No `.gitnexus/run.cjs` yet? `npx gitnexus analyze` (npm 11 crash → `npm i -g gitnexus`; #1939).
 
 ## Always Do
 
-- **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `gitnexus_impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
-- **MUST run `gitnexus_detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows.
+- **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
+- **MUST run `detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows. For regression review, compare against the default branch: `detect_changes({scope: "compare", base_ref: "main"})`.
 - **MUST warn the user** if impact analysis returns HIGH or CRITICAL risk before proceeding with edits.
-- When exploring unfamiliar code, use `gitnexus_query({query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
-- When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `gitnexus_context({name: "symbolName"})`.
-
-## When Debugging
-
-1. `gitnexus_query({query: "<error or symptom>"})` — find execution flows related to the issue
-2. `gitnexus_context({name: "<suspect function>"})` — see all callers, callees, and process participation
-3. `READ gitnexus://repo/self-healing-agent/process/{processName}` — trace the full execution flow step by step
-4. For regressions: `gitnexus_detect_changes({scope: "compare", base_ref: "main"})` — see what your branch changed
-
-## When Refactoring
-
-- **Renaming**: MUST use `gitnexus_rename({symbol_name: "old", new_name: "new", dry_run: true})` first. Review the preview — graph edits are safe, text_search edits need manual review. Then run with `dry_run: false`.
-- **Extracting/Splitting**: MUST run `gitnexus_context({name: "target"})` to see all incoming/outgoing refs, then `gitnexus_impact({target: "target", direction: "upstream"})` to find all external callers before moving code.
-- After any refactor: run `gitnexus_detect_changes({scope: "all"})` to verify only expected files changed.
+- When exploring unfamiliar code, use `query({search_query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
+- When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `context({name: "symbolName"})`.
+- For security review, `explain({target: "fileOrSymbol"})` lists taint findings (source→sink flows; needs `analyze --pdg`).
 
 ## Never Do
 
-- NEVER edit a function, class, or method without first running `gitnexus_impact` on it.
+- NEVER edit a function, class, or method without first running `impact` on it.
 - NEVER ignore HIGH or CRITICAL risk warnings from impact analysis.
-- NEVER rename symbols with find-and-replace — use `gitnexus_rename` which understands the call graph.
-- NEVER commit changes without running `gitnexus_detect_changes()` to check affected scope.
-
-## Tools Quick Reference
-
-| Tool             | When to use                   | Command                                                                 |
-| ---------------- | ----------------------------- | ----------------------------------------------------------------------- |
-| `query`          | Find code by concept          | `gitnexus_query({query: "auth validation"})`                            |
-| `context`        | 360-degree view of one symbol | `gitnexus_context({name: "validateUser"})`                              |
-| `impact`         | Blast radius before editing   | `gitnexus_impact({target: "X", direction: "upstream"})`                 |
-| `detect_changes` | Pre-commit scope check        | `gitnexus_detect_changes({scope: "staged"})`                            |
-| `rename`         | Safe multi-file rename        | `gitnexus_rename({symbol_name: "old", new_name: "new", dry_run: true})` |
-| `cypher`         | Custom graph queries          | `gitnexus_cypher({query: "MATCH ..."})`                                 |
-
-## Impact Risk Levels
-
-| Depth | Meaning                               | Action                |
-| ----- | ------------------------------------- | --------------------- |
-| d=1   | WILL BREAK — direct callers/importers | MUST update these     |
-| d=2   | LIKELY AFFECTED — indirect deps       | Should test           |
-| d=3   | MAY NEED TESTING — transitive         | Test if critical path |
+- NEVER rename symbols with find-and-replace — use `rename` which understands the call graph.
+- NEVER commit changes without running `detect_changes()` to check affected scope.
 
 ## Resources
 
-| Resource                                            | Use for                                  |
-| --------------------------------------------------- | ---------------------------------------- |
-| `gitnexus://repo/self-healing-agent/context`        | Codebase overview, check index freshness |
-| `gitnexus://repo/self-healing-agent/clusters`       | All functional areas                     |
-| `gitnexus://repo/self-healing-agent/processes`      | All execution flows                      |
-| `gitnexus://repo/self-healing-agent/process/{name}` | Step-by-step execution trace             |
-
-## Self-Check Before Finishing
-
-Before completing any code modification task, verify:
-
-1. `gitnexus_impact` was run for all modified symbols
-2. No HIGH/CRITICAL risk warnings were ignored
-3. `gitnexus_detect_changes()` confirms changes match expected scope
-4. All d=1 (WILL BREAK) dependents were updated
+| Resource                                              | Use for                                  |
+| ----------------------------------------------------- | ---------------------------------------- |
+| `gitnexus://repo/playwright-ai-healer/context`        | Codebase overview, check index freshness |
+| `gitnexus://repo/playwright-ai-healer/clusters`       | All functional areas                     |
+| `gitnexus://repo/playwright-ai-healer/processes`      | All execution flows                      |
+| `gitnexus://repo/playwright-ai-healer/process/{name}` | Step-by-step execution trace             |
 
 ## CLI
 
-- Re-index: `npx gitnexus analyze`
-- Check freshness: `npx gitnexus status`
-- Generate docs: `npx gitnexus wiki`
+| Task                                         | Read this skill file                                        |
+| -------------------------------------------- | ----------------------------------------------------------- |
+| Understand architecture / "How does X work?" | `.claude/skills/gitnexus/gitnexus-exploring/SKILL.md`       |
+| Blast radius / "What breaks if I change X?"  | `.claude/skills/gitnexus/gitnexus-impact-analysis/SKILL.md` |
+| Trace bugs / "Why is X failing?"             | `.claude/skills/gitnexus/gitnexus-debugging/SKILL.md`       |
+| Rename / extract / split / refactor          | `.claude/skills/gitnexus/gitnexus-refactoring/SKILL.md`     |
+| Tools, resources, schema reference           | `.claude/skills/gitnexus/gitnexus-guide/SKILL.md`           |
+| Index, status, clean, wiki CLI commands      | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md`             |
 
 <!-- gitnexus:end -->
