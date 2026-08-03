@@ -179,7 +179,7 @@ src/
 └── utils/
     ├── Environment.ts         # Multi-env loader
     ├── Logger.ts              # Winston wrapper
-    ├── CircuitBreaker.ts      # Per-provider circuit breaker (opens after 5 failures)
+    ├── CircuitBreaker.ts      # Per-provider circuit breaker (opens after 5 failures; shared per worker process)
     ├── HealingMetrics.ts      # Per-key selector failure/heal event tracking
     ├── LocatorAdapter.ts      # Pluggable storage: FileAdapter | SQLiteAdapter
     ├── LocatorManager.ts      # Selector persistence (facade over LocatorAdapter) + stability metrics
@@ -259,6 +259,14 @@ async click(selector: string) {
 ```
 
 _Note: If the primary AI Provider (e.g. Gemini) hits a 4xx Rate Limit error, the `AutoHealer` automatically detects the quota failure and falls back to an alternate AI Provider (e.g. OpenAI) if configured!_
+
+### ⚡ Circuit Breaker
+
+When a provider fails 5 times consecutively, its circuit opens and further healing attempts **fast-fail** without spending an API call. After 60s the breaker half-opens and lets one probe through; success closes it, failure reopens it immediately.
+
+Breakers live in a **module-scoped registry keyed by provider**, so all `HealingEngine` instances in a process share them. This matters because an engine is built per `AutoHealer`, which the Playwright fixture builds **per test** — when the registry was an instance field, the failure count reset at every test boundary and, against a threshold of 5, the breaker could essentially never open.
+
+Scope is the **worker process**: Playwright workers are separate processes with no shared memory, so each detects an outage independently. With N workers, up to N × 5 requests are spent before all have opened. Coordinating across workers would require out-of-process state and is deliberately not attempted.
 
 ### 🧭 Keeping page objects on the healing path
 
