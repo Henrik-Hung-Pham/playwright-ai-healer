@@ -72,6 +72,28 @@ export function resetProviderCircuitBreakers(): void {
 }
 
 /**
+ * Count how many elements a candidate selector matches, treating an unparseable
+ * selector as "no answer" rather than an exception.
+ *
+ * `page.locator(sel).count()` throws when the string is not valid selector
+ * syntax. A verbose model reply can survive parsing and validation as something
+ * that merely *looks* selector-shaped, and that throw used to escape the
+ * scoring path and abort the whole heal with an opaque
+ * `Unexpected token … while parsing css selector` message. A candidate we
+ * cannot even evaluate is simply a candidate we reject.
+ *
+ * @returns The match count, or `null` when the selector is not parseable.
+ */
+async function countMatches(page: Page, selector: string): Promise<number | null> {
+    try {
+        return await page.locator(selector).count();
+    } catch (error) {
+        logger.warn(`[HealingEngine] 🛡️ Candidate selector is not parseable: "${selector}" — ${String(error)}`);
+        return null;
+    }
+}
+
+/**
  * Encapsulates the AI-powered selector healing logic.
  *
  * Given a failed selector and an error, `HealingEngine` captures a DOM snapshot,
@@ -139,11 +161,11 @@ export class HealingEngine {
     private async disambiguateIfAmbiguous(page: Page, selector: string): Promise<string> {
         if (hasPositionalSuffix(selector)) return selector;
 
-        const matchCount = await page.locator(selector).count();
-        if (matchCount <= 1) return selector;
+        const matchCount = await countMatches(page, selector);
+        if (matchCount === null || matchCount <= 1) return selector;
 
         const pinned = `${selector} >> nth=0`;
-        const pinnedCount = await page.locator(pinned).count();
+        const pinnedCount = await countMatches(page, pinned);
         if (pinnedCount !== 1) return selector;
 
         logger.info(
@@ -256,24 +278,31 @@ export class HealingEngine {
                     // Score the healed selector against the live DOM. Confidence is
                     // derived from real signal — match uniqueness and selector-strategy
                     // stability — not a binary "matched something" flag.
-                    const elementCount = await page.locator(selector).count();
-                    const { confidence, strategy, reasoning } = scoreSelector(selector, elementCount);
-                    if (confidence < config.ai.healing.confidenceThreshold) {
+                    const elementCount = await countMatches(page, selector);
+                    if (elementCount === null) {
                         logger.warn(
-                            `[HealingEngine:heal] 🛡️ HEALING REJECTED. Healed selector "${selector}" scored too low ` +
-                                `(confidence=${confidence} < threshold=${config.ai.healing.confidenceThreshold}). ${reasoning}`
+                            `[HealingEngine:heal] 🛡️ HEALING REJECTED. Healed selector "${selector}" is not ` +
+                                `parseable as a selector.`
                         );
                     } else {
-                        healingSuccess = true;
-                        healingResult = {
-                            selector,
-                            confidence,
-                            reasoning,
-                            strategy,
-                        };
-                        logger.info(
-                            `[HealingEngine:heal] ✨ HEALING SUCCEEDED! New selector: "${selector}" (confidence=${confidence}, strategy=${strategy})`
-                        );
+                        const { confidence, strategy, reasoning } = scoreSelector(selector, elementCount);
+                        if (confidence < config.ai.healing.confidenceThreshold) {
+                            logger.warn(
+                                `[HealingEngine:heal] 🛡️ HEALING REJECTED. Healed selector "${selector}" scored too low ` +
+                                    `(confidence=${confidence} < threshold=${config.ai.healing.confidenceThreshold}). ${reasoning}`
+                            );
+                        } else {
+                            healingSuccess = true;
+                            healingResult = {
+                                selector,
+                                confidence,
+                                reasoning,
+                                strategy,
+                            };
+                            logger.info(
+                                `[HealingEngine:heal] ✨ HEALING SUCCEEDED! New selector: "${selector}" (confidence=${confidence}, strategy=${strategy})`
+                            );
+                        }
                     }
                 }
             } else {

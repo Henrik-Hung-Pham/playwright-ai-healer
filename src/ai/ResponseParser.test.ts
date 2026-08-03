@@ -71,6 +71,64 @@ describe('ResponseParser', () => {
             expect(parseAIResponse(verbose)).toBeNull();
         });
 
+        // ── Regressions found by tests/benchmark/healing-accuracy.spec.ts ─────
+        //
+        // Both payloads below are verbatim gemma-4-31b-it replies captured by the
+        // healing-accuracy benchmark. Each previously yielded a non-selector
+        // string that reached page.locator() and threw
+        // "Unexpected token … while parsing css selector".
+
+        it('should not mis-pair backticks around a fenced block and return prose', () => {
+            const verbose = [
+                '*   Original Selector: `.qty-input`',
+                '*   Goal: Find the element intended for quantity input.',
+                '*   HTML provided:',
+                '    ```html',
+                '    <body>',
+                '      <input id="quantity" name="quantity" class="form-control product-quantity" type="number">',
+                '      <input id="coupon" name="coupon" class="form-control" type="text">',
+                '    </body>',
+                '    ```',
+                '*   Analysis:',
+                '    *   `#quantity` is the most specific and unique selector.',
+                '',
+                '*   Selector: `#quantity`',
+                '*   Check uniqueness: Only one element has `id="quantity"`.',
+                '*   Check format: Plain string, no markdown, no quotes.#quantity',
+            ].join('\n');
+
+            // Previously returned "*   Check uniqueness: Only one element has" —
+            // the prose *between* two code spans, captured because the fence's
+            // three backticks offset every subsequent pair.
+            expect(parseAIResponse(verbose)).toBe('#quantity');
+        });
+
+        it('should not return a bare attribute pair cited as evidence of uniqueness', () => {
+            const verbose = [
+                '*   Selector: `[data-testid="discount-code"]`',
+                '*   Check uniqueness: Only one element has `data-testid="discount-code"`.',
+            ].join('\n');
+
+            // `data-testid="discount-code"` is a valid-looking attribute pair but
+            // not a selector; page.locator() throws on it.
+            expect(parseAIResponse(verbose)).toBe('[data-testid="discount-code"]');
+        });
+
+        it('should ignore an HTML fragment quoted from the page', () => {
+            const verbose = [
+                '*   The element is `<button type="button" id="place-order-btn">Place Order</button>`',
+                '*   Selector: `#place-order-btn`',
+                '*   Done, returning `<button id="place-order-btn">` for reference.',
+            ].join('\n');
+
+            expect(parseAIResponse(verbose)).toBe('#place-order-btn');
+        });
+
+        it('should still prefer a fenced selector when the prose has no code spans', () => {
+            const verbose = ['Here is the answer:', '```css', '#place-order-btn', '```'].join('\n');
+            expect(parseAIResponse(verbose)).toBe('#place-order-btn');
+        });
+
         it('should return the last non-empty line when no line looks like a selector', () => {
             // Pure prose with no salvageable selector — downstream validation rejects it.
             const prose = 'I could not find a good match.\nPlease check the page manually.';

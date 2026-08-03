@@ -3,6 +3,7 @@ import { expect, test } from '@playwright/test';
 import { AutoHealer } from '../AutoHealer.js';
 import { logger } from '../utils/Logger.js';
 import { config } from '../config/index.js';
+import { LocatorManager } from '../utils/LocatorManager.js';
 import { type SiteHandler, BooksToScrapeHandler } from '../utils/SiteHandler.js';
 
 /**
@@ -272,11 +273,61 @@ export abstract class BasePage {
     }
 
     /**
+     * Resolve a dot-path locator key to its current selector string.
+     *
+     * Reads through {@link LocatorManager} on every call rather than from a
+     * module-scoped `locators.json` import, so a selector repaired earlier in
+     * the same run is picked up immediately instead of at next process start.
+     *
+     * Use this when a selector must be *composed* — pinned to an index, chained
+     * into a parent, or narrowed by text — because those forms have to be built
+     * from the resolved value. When the target is a single element, prefer
+     * passing the bare key to {@link safeClick} / {@link safeWaitForSelector}:
+     * a bare key also lets `AutoHealer` persist the repaired selector back to
+     * the store, which a composed string cannot do.
+     *
+     * @param key - Dot-path locator key (e.g. `booksToScrape.bookTitle`).
+     * @returns The stored selector, or `key` unchanged when it is not a known key.
+     */
+    protected selectorFor(key: string): string {
+        return LocatorManager.getInstance().getLocator(key) ?? key;
+    }
+
+    /**
+     * Wait for an element, dismissing overlays first and delegating to `AutoHealer` when available.
+     *
+     * Pass a bare locator key so a broken selector is both healed and persisted.
+     * This is the read-path counterpart to {@link safeClick}: page objects that
+     * only *read* an element (title, price) still route through the healer
+     * instead of silently failing on a stale selector.
+     *
+     * @param selectorOrKey - Dot-notation locator key or raw CSS selector.
+     * @param options.state - Element state to wait for.
+     * @param options.timeout - Maximum time in milliseconds to wait.
+     */
+    async safeWaitForSelector(
+        selectorOrKey: string,
+        options?: { state?: 'attached' | 'detached' | 'visible' | 'hidden'; timeout?: number }
+    ): Promise<void> {
+        await this.ensureOverlaysDismissed();
+        if (this.autoHealer) {
+            await this.withSecurityCheck(() => this.autoHealer!.waitForSelector(selectorOrKey, options));
+        } else {
+            await this.withSecurityCheck(() => this.page.waitForSelector(selectorOrKey, options ?? {}));
+        }
+    }
+
+    /**
      * Click an element, dismissing overlays first and delegating to `AutoHealer` when available.
      *
      * Accepts a dot-notation locator key (e.g. `booksToScrape.bookTitle`) or a raw CSS selector.
      * When a string selector is provided and `autoHealer` is configured, healing is attempted
-     * automatically on failure. When a `Locator` object is provided, it is clicked directly.
+     * automatically on failure.
+     *
+     * **Passing a `Locator` bypasses healing entirely** — the object is clicked directly,
+     * because a pre-resolved `Locator` carries no selector string for the AI to repair.
+     * Prefer a key or a selector string composed via {@link selectorFor}; reserve the
+     * `Locator` overload for elements that genuinely cannot be addressed by a selector.
      *
      * @param selectorOrLocator - Dot-notation locator key, CSS selector, or Playwright `Locator`.
      * @param options.force - Bypass actionability checks.
