@@ -61,7 +61,7 @@ Test → BasePage.safeClick/safeFill
 | ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `src/AutoHealer.ts`                | Public healing API (`click`, `fill`, `hover`…) + `heal()` orchestration; records `HealingEvent[]`                                                  |
 | `src/ai/AIClientManager.ts`        | Owns AI client lifecycle (OpenAI/Gemini), API key rotation, provider failover, and raw `makeRequest()` with timeout                                |
-| `src/ai/DOMSerializer.ts`          | `getSimplifiedDOM(page)` — focused snapshot of interactive elements for the AI prompt                                                              |
+| `src/ai/DOMSerializer.ts`          | `getSimplifiedDOM(page, maxChars)` — focused snapshot of interactive elements for the AI prompt, budget-capped per node                            |
 | `src/ai/ResponseParser.ts`         | `parseAIResponse()` — strips markdown fences, backticks, and quotes from raw AI output                                                             |
 | `src/config/index.ts`              | Centralized config validated with Zod; exports `config` object; loads `.env.{TEST_ENV}` via `Environment.ts`                                       |
 | `src/config/locators.json`         | Persistent selector store; updated at runtime by `LocatorManager` when healing succeeds                                                            |
