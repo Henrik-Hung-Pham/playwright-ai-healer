@@ -10,7 +10,9 @@ const { mockLocatorManager } = vi.hoisted(() => {
         mockLocatorManager: {
             getLocator: vi.fn((key: string) => (key === 'app.btn' ? '#old-selector' : null)),
             updateLocator: vi.fn().mockResolvedValue(undefined),
-            recordSelectorFailure: vi.fn(),
+            // Resolves to a SelectorFailureOutcome; AutoHealer inspects `quarantined`
+            // to report a rollback.
+            recordSelectorFailure: vi.fn().mockResolvedValue({ recorded: true, failureCount: 1, quarantined: false }),
             recordSelectorHealed: vi.fn(),
         },
     };
@@ -658,7 +660,9 @@ describe('AutoHealer', () => {
             await healer.healAll([{ selectorOrKey: 'app.btn', action: 'click' }]);
 
             expect(mockLocatorManager.updateLocator).toHaveBeenCalledWith('app.btn', '#healed-selector');
-            expect(mockLocatorManager.recordSelectorHealed).toHaveBeenCalledWith('app.btn');
+            // The pre-heal selector is passed through as the rollback target, so a
+            // heal that turns out to be wrong can later be reverted.
+            expect(mockLocatorManager.recordSelectorHealed).toHaveBeenCalledWith('app.btn', '#old-selector');
         });
 
         it('should handle hover action in runOperation', async () => {
