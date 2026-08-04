@@ -205,10 +205,15 @@ export class HealingEngine {
         // and reuse it across all retry / key-rotation / provider-failover attempts.
         // This avoids redundant page.evaluate() calls on each retry.
         logger.info(`[HealingEngine:heal] 📸 Step 1: Capturing simplified DOM (cached for all retries)...`);
-        const rawSnapshot = await getSimplifiedDOM(page);
-        const htmlSnapshot = rawSnapshot.substring(0, config.ai.healing.domSnapshotCharLimit);
+        // The serializer enforces the budget while it walks, so it can spend the
+        // allowance on whole elements and flag truncation. Clipping its output
+        // here instead (as this used to) would cut mid-tag and silently discard
+        // the truncation notice.
+        const charLimit = config.ai.healing.domSnapshotCharLimit;
+        const htmlSnapshot = await getSimplifiedDOM(page, charLimit);
         logger.info(
-            `[HealingEngine:heal] 📊 DOM snapshot length: ${htmlSnapshot.length}/${rawSnapshot.length} chars (limit: ${config.ai.healing.domSnapshotCharLimit})`
+            `[HealingEngine:heal] 📊 DOM snapshot length: ${htmlSnapshot.length} chars (limit: ${charLimit})` +
+                `${htmlSnapshot.includes('DOM truncated') ? ' — TRUNCATED, model sees a partial page' : ''}`
         );
         logger.debug(`[HealingEngine:heal] DOM snapshot preview (first 500 chars): ${htmlSnapshot.substring(0, 500)}`);
 

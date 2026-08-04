@@ -105,7 +105,10 @@ TEST_TIMEOUT=120000
 HEADLESS=true
 
 # AI Healing (optional — defaults shown)
-DOM_SNAPSHOT_CHAR_LIMIT=12000  # Max chars of DOM sent to AI; must be >= 100 (serialiser caps at 15000)
+DOM_SNAPSHOT_CHAR_LIMIT=12000  # Max chars of DOM sent to AI; must be >= 100. This is the whole
+                               # budget — the serialiser enforces it while walking the tree and
+                               # appends an explicit `<!-- DOM truncated … -->` notice if it runs
+                               # out, so raising this value genuinely widens the model's view.
 HEALING_FAILURE_MODE=fail      # 'fail' (default) throws when healing cannot produce a usable
                                # selector; 'skip' calls test.skip() instead. Prefer 'fail' — a
                                # skipped test reports green, hiding a healer that never worked.
