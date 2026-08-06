@@ -7,6 +7,7 @@ import {
     resetProviderCircuitBreakers,
 } from './HealingEngine.js';
 import type { AIClientManager } from './AIClientManager.js';
+import { logger } from '../utils/Logger.js';
 
 // ---------------------------------------------------------------------------
 // Hoist controllable mock functions so vi.mock() factories can reference them
@@ -387,6 +388,51 @@ describe('HealingEngine', () => {
     });
 
     // ── getHealingEvents ──────────────────────────────────────────────────────
+
+    // ── DOM capture failure ──────────────────────────────────────────────────
+
+    describe('when the DOM snapshot cannot be captured', () => {
+        // A page closed or navigated mid-heal makes `page.evaluate` reject — and
+        // that is precisely when a heal is likely to be in flight. The capture
+        // used to run before `heal()`'s try/finally, so the rejection propagated
+        // out of the healer, replaced the caller's original interaction error with
+        // an opaque DOM error, and skipped event recording entirely.
+        const captureFailure = new Error('Execution context was destroyed');
+
+        beforeEach(() => {
+            mockGetSimplifiedDOM.mockRejectedValue(captureFailure);
+        });
+
+        it('returns null rather than throwing, so the caller keeps its original error', async () => {
+            await expect(engine.heal(page, '#old-btn', new Error('Element not found'))).resolves.toBeNull();
+        });
+
+        it('still records a failure event so the outage is visible to metrics', async () => {
+            await engine.heal(page, '#old-btn', new Error('Element not found'));
+
+            const events = engine.getHealingEvents();
+            expect(events).toHaveLength(1);
+            expect(events[0]?.success).toBe(false);
+            expect(events[0]?.originalSelector).toBe('#old-btn');
+            // The event carries the original interaction error — the reason healing
+            // was attempted — not the capture error that ended it.
+            expect(events[0]?.error).toBe('Element not found');
+            expect(events[0]?.domSnapshotLength).toBe(0);
+        });
+
+        it('never reaches the AI provider', async () => {
+            await engine.heal(page, '#old-btn', new Error('Element not found'));
+
+            expect(clientManager.makeRequest).not.toHaveBeenCalled();
+        });
+
+        it('logs the capture failure distinctly from a model failure', async () => {
+            await engine.heal(page, '#old-btn', new Error('Element not found'));
+
+            const logged = vi.mocked(logger.error).mock.calls.map(args => String(args[0]));
+            expect(logged.some(msg => msg.includes('DOM capture failed'))).toBe(true);
+        });
+    });
 
     it('getHealingEvents returns an empty array initially', () => {
         expect(engine.getHealingEvents()).toEqual([]);

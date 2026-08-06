@@ -182,6 +182,12 @@ export class HealingEngine {
      * the AI provider, handles retries / key rotation / provider failover, and
      * validates the returned selector before accepting it.
      *
+     * Never throws: every failure mode — DOM capture rejecting, the provider being
+     * unreachable, an unusable or low-confidence reply — resolves to `null` and is
+     * recorded as a failed `HealingEvent`. Callers therefore keep the original
+     * interaction error to report, rather than having it replaced by an error from
+     * the repair attempt.
+     *
      * @param page - Playwright page instance to capture the DOM from
      * @param originalSelector - The selector that failed
      * @param error - The error that occurred during the failed interaction
@@ -199,35 +205,58 @@ export class HealingEngine {
             `[HealingEngine:heal] 🔑 Available API keys: ${this.clientManager.getKeyCount()}, Current key index: ${this.clientManager.getCurrentKeyIndex()}`
         );
 
-        // 1. Capture simplified DOM — ONCE, before the retry loop.
-        // The DOM state is static within a single heal() call (the page hasn't
-        // navigated or been mutated between retries), so we cache the snapshot
-        // and reuse it across all retry / key-rotation / provider-failover attempts.
-        // This avoids redundant page.evaluate() calls on each retry.
-        logger.info(`[HealingEngine:heal] 📸 Step 1: Capturing simplified DOM (cached for all retries)...`);
-        // The serializer enforces the budget while it walks, so it can spend the
-        // allowance on whole elements and flag truncation. Clipping its output
-        // here instead (as this used to) would cut mid-tag and silently discard
-        // the truncation notice.
-        const charLimit = config.ai.healing.domSnapshotCharLimit;
-        const htmlSnapshot = await getSimplifiedDOM(page, charLimit);
-        logger.info(
-            `[HealingEngine:heal] 📊 DOM snapshot length: ${htmlSnapshot.length} chars (limit: ${charLimit})` +
-                `${htmlSnapshot.includes('DOM truncated') ? ' — TRUNCATED, model sees a partial page' : ''}`
-        );
-        logger.debug(`[HealingEngine:heal] DOM snapshot preview (first 500 chars): ${htmlSnapshot.substring(0, 500)}`);
-
-        // 2. Construct Prompt
-        logger.info(`[HealingEngine:heal] ✍️ Step 2: Constructing prompt...`);
-        const promptText = config.ai.prompts.healingPrompt(originalSelector, error.message, htmlSnapshot);
-        logger.info(`[HealingEngine:heal] 📏 Prompt length: ${promptText.length} chars`);
-        logger.debug(`[HealingEngine:heal] Prompt preview (first 300 chars): ${promptText.substring(0, 300)}`);
-
         let healingSuccess = false;
         let healingResult: HealingResult | null = null;
         let tokensUsed: { prompt: number; completion: number; total: number } | undefined;
+        // Declared outside the try so the `finally` block can always report the
+        // snapshot size, including on the paths that never got one.
+        let htmlSnapshot = '';
 
         try {
+            // 1. Capture simplified DOM — ONCE, before the retry loop.
+            // The DOM state is static within a single heal() call (the page hasn't
+            // navigated or been mutated between retries), so we cache the snapshot
+            // and reuse it across all retry / key-rotation / provider-failover attempts.
+            // This avoids redundant page.evaluate() calls on each retry.
+            //
+            // This capture sits *inside* the try deliberately. It used to run before
+            // it, so a `page.evaluate` rejection — a page closed or navigated while
+            // the heal was in flight, which is exactly when healing is most likely to
+            // be running — propagated straight out of `heal()`. That replaced the
+            // caller's original interaction error with an opaque DOM-capture error and
+            // skipped the `finally` block, so no `HealingEvent` was recorded either:
+            // the one failure mode where the original error matters most was the one
+            // that discarded it, and it was invisible to `HealingMetrics`.
+            logger.info(`[HealingEngine:heal] 📸 Step 1: Capturing simplified DOM (cached for all retries)...`);
+            // The serializer enforces the budget while it walks, so it can spend the
+            // allowance on whole elements and flag truncation. Clipping its output
+            // here instead (as this used to) would cut mid-tag and silently discard
+            // the truncation notice.
+            const charLimit = config.ai.healing.domSnapshotCharLimit;
+            try {
+                htmlSnapshot = await getSimplifiedDOM(page, charLimit);
+            } catch (snapshotError) {
+                // Logged distinctly so this is not mistaken for a model failure:
+                // the provider was never asked.
+                logger.error(
+                    `[HealingEngine:heal] 📷 DOM capture failed — cannot build a healing prompt: ${String(snapshotError)}`
+                );
+                throw snapshotError;
+            }
+            logger.info(
+                `[HealingEngine:heal] 📊 DOM snapshot length: ${htmlSnapshot.length} chars (limit: ${charLimit})` +
+                    `${htmlSnapshot.includes('DOM truncated') ? ' — TRUNCATED, model sees a partial page' : ''}`
+            );
+            logger.debug(
+                `[HealingEngine:heal] DOM snapshot preview (first 500 chars): ${htmlSnapshot.substring(0, 500)}`
+            );
+
+            // 2. Construct Prompt
+            logger.info(`[HealingEngine:heal] ✍️ Step 2: Constructing prompt...`);
+            const promptText = config.ai.prompts.healingPrompt(originalSelector, error.message, htmlSnapshot);
+            logger.info(`[HealingEngine:heal] 📏 Prompt length: ${promptText.length} chars`);
+            logger.debug(`[HealingEngine:heal] Prompt preview (first 300 chars): ${promptText.substring(0, 300)}`);
+
             // 3. Execute AI request with automatic retry / key rotation / provider failover
             logger.info(`[HealingEngine:heal] 🔁 Step 3: Starting AI request via RetryOrchestrator`);
             const orchestrator = new RetryOrchestrator(this.clientManager);
