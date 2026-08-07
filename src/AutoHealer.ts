@@ -45,14 +45,17 @@ export class AutoHealer {
      *
      * @param page - Playwright page instance
      * @param apiKeys - API key(s) for the AI provider. Can be a single key or array for rotation
-     * @param provider - AI provider to use ('openai' or 'gemini')
+     * @param provider - AI provider to use ('openai' or 'gemini'). Defaults to
+     *   `config.ai.provider` (the `AI_PROVIDER` env var), not a hard-coded
+     *   `'gemini'` — the old literal default meant an omitted argument silently
+     *   overrode the configured provider.
      * @param modelName - Model name to use (defaults based on provider)
      * @param debug - Enable debug logging
      */
     constructor(
         page: Page,
         apiKeys: string | string[],
-        provider: AIProvider = 'gemini',
+        provider: AIProvider = config.ai.provider,
         modelName?: string,
         debug = false
     ) {

@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { test as base } from '@playwright/test';
 import { AutoHealer } from '../../src/AutoHealer.js';
+import { resolveAIProvider } from '../../src/ai/ProviderResolver.js';
 import { BooksHomePage } from '../../src/pages/BooksHomePage.js';
 import { BooksToScrapeHandler } from '../../src/utils/SiteHandler.js';
 import { config } from '../../src/config/index.js';
@@ -56,27 +57,15 @@ export const test = base.extend<MyFixtures, MyWorkerFixtures>({
     ],
 
     autoHealer: async ({ page }, use) => {
-        const { ai } = config;
+        // Provider selection is `AI_PROVIDER`'s job, delegated to
+        // `resolveAIProvider` so it is unit-testable. This fixture used to pick by
+        // key presence instead — `if (ai.gemini.apiKey) … else if (openai) …` —
+        // which silently ran Gemini whenever a GEMINI_API_KEY happened to be set,
+        // even with AI_PROVIDER=openai.
+        const { provider, apiKeys, modelName } = resolveAIProvider(config.ai);
+        logger.debug(`[Fixture] AI_PROVIDER=${provider}, model=${modelName}`);
 
-        let provider: 'openai' | 'gemini';
-        let apiKeys: string | string[];
-        let model: string;
-
-        if (ai.gemini.apiKey) {
-            provider = 'gemini';
-            apiKeys = ai.gemini.apiKey;
-            model = ai.gemini.modelName;
-        } else if (ai.openai.apiKeys && ai.openai.apiKeys.length > 0) {
-            logger.debug(`[Fixture] Checking openai keys. Length: ${ai.openai.apiKeys.length}`);
-            provider = 'openai';
-            apiKeys = ai.openai.apiKeys;
-            model = ai.openai.modelName;
-        } else {
-            logger.error('[Fixture] No API keys found for Gemini or OpenAI');
-            throw new Error('API Key missing! Check src/config/index.ts or .env');
-        }
-
-        const healer = new AutoHealer(page, apiKeys, provider, model, true);
+        const healer = new AutoHealer(page, apiKeys, provider, modelName, true);
         await use(healer);
     },
 

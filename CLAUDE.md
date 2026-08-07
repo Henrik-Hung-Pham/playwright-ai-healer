@@ -78,7 +78,10 @@ Test → BasePage.safeClick/safeFill
 
 Environment is selected by `TEST_ENV` variable (`dev`/`staging`/`prod`). The config loads `.env.{TEST_ENV}` first, then `.env` overrides. Required env vars are validated with Zod at startup:
 
-- `AI_PROVIDER=gemini|openai` (default: `gemini`)
+- `AI_PROVIDER=gemini|openai` (default: `gemini`) — the sole authority on which provider is used.
+  Resolved by `resolveAIProvider()` (`src/ai/ProviderResolver.ts`); keys for both providers may be
+  present, and only the selected provider's key and model are read. Never select a provider by
+  probing which key happens to be set — that bug shipped once already.
 - `GEMINI_API_KEY` — required if provider is `gemini`
 - `GEMINI_MODEL` — Gemini/Gemma model name (default: `gemma-4-31b-it`)
 - `OPENAI_API_KEY` / `OPENAI_API_KEYS` (comma-separated for rotation) — required if provider is `openai`

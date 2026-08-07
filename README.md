@@ -88,12 +88,14 @@ Create a `.env.prod` file (or copy from `.env.example`):
 ENV=prod
 BASE_URL=https://books.toscrape.com/
 
-# AI Provider (gemini or openai)
+# AI Provider (gemini or openai) — decides which provider is used, on its own.
+# Keys for both may be present; only the selected provider's key is read, and
+# startup fails fast if that provider has no key.
 AI_PROVIDER=gemini
 GEMINI_API_KEY=your_gemini_key_here
 GEMINI_MODEL=gemma-4-31b-it
 
-# Or use OpenAI
+# Or use OpenAI (set AI_PROVIDER=openai — supplying a key alone does not switch provider)
 OPENAI_API_KEY=sk-your-openai-key
 OPENAI_MODEL=gpt-4o
 
@@ -167,6 +169,7 @@ src/
 │   ├── RetryOrchestrator.ts   # Exponential backoff with jitter for AI retries
 │   ├── DOMSerializer.ts       # getSimplifiedDOM() — interactive-element snapshot
 │   ├── ResponseParser.ts      # parseAIResponse() — cleans raw AI output
+│   ├── ProviderResolver.ts    # resolveAIProvider() — AI_PROVIDER → keys + model
 │   ├── SelectorValidator.ts   # Denylist/allowlist guard for AI-returned selectors
 │   └── index.ts               # Barrel re-export
 ├── config/
