@@ -23,6 +23,55 @@ export function hasPositionalSuffix(selector: string): boolean {
 }
 
 /**
+ * Circuit breakers keyed by AI provider, shared by every `HealingEngine` in the
+ * process.
+ *
+ * This registry used to be an instance field. A `HealingEngine` is built per
+ * `AutoHealer`, which Playwright's `autoHealer` fixture builds **per test** — so
+ * the consecutive-failure count reset at every test boundary. With a threshold
+ * of 5 and rarely more than one or two heal attempts in a single test, the
+ * breaker could essentially never open: the component was correct in isolation
+ * and inert in practice.
+ *
+ * Hoisting to module scope lets failures accumulate across every test in a
+ * worker, which is the timescale on which a provider outage or an exhausted
+ * quota actually shows up.
+ *
+ * **Scope is the worker process.** Playwright runs workers as separate processes
+ * with no shared memory, so each detects an outage independently — with N
+ * workers, up to N × `failureThreshold` requests are spent before all of them
+ * have opened. Coordinating across workers would need out-of-process state and
+ * is deliberately out of scope; per-worker is a large improvement over per-test
+ * and costs nothing.
+ */
+const providerCircuitBreakers = new Map<string, CircuitBreaker>();
+
+/**
+ * Get (or lazily create) the shared circuit breaker for an AI provider.
+ *
+ * @param provider - Provider key, e.g. `'gemini'` or `'openai'`.
+ */
+export function getProviderCircuitBreaker(provider: string): CircuitBreaker {
+    let breaker = providerCircuitBreakers.get(provider);
+    if (!breaker) {
+        breaker = new CircuitBreaker();
+        providerCircuitBreakers.set(provider, breaker);
+    }
+    return breaker;
+}
+
+/**
+ * Discard all provider circuit breakers.
+ *
+ * **For testing only.** Module-scoped state persists across test cases within a
+ * file, so a test that drives a breaker open would otherwise leak that state
+ * into every test after it.
+ */
+export function resetProviderCircuitBreakers(): void {
+    providerCircuitBreakers.clear();
+}
+
+/**
  * Count how many elements a candidate selector matches, treating an unparseable
  * selector as "no answer" rather than an exception.
  *
@@ -66,13 +115,16 @@ export class HealingEngine {
 
     private clientManager: AIClientManager;
     private healingEvents: HealingEvent[] = [];
-    private readonly circuitBreakers: Map<string, CircuitBreaker> = new Map();
 
+    /**
+     * Resolve the circuit breaker for a provider.
+     *
+     * Delegates to the module-scoped {@link getProviderCircuitBreaker} registry
+     * so breakers are shared by every engine in the process rather than being
+     * scoped to one engine — and therefore, in practice, to one test.
+     */
     private getCircuitBreaker(provider: string): CircuitBreaker {
-        if (!this.circuitBreakers.has(provider)) {
-            this.circuitBreakers.set(provider, new CircuitBreaker());
-        }
-        return this.circuitBreakers.get(provider)!;
+        return getProviderCircuitBreaker(provider);
     }
 
     /**
@@ -130,6 +182,12 @@ export class HealingEngine {
      * the AI provider, handles retries / key rotation / provider failover, and
      * validates the returned selector before accepting it.
      *
+     * Never throws: every failure mode — DOM capture rejecting, the provider being
+     * unreachable, an unusable or low-confidence reply — resolves to `null` and is
+     * recorded as a failed `HealingEvent`. Callers therefore keep the original
+     * interaction error to report, rather than having it replaced by an error from
+     * the repair attempt.
+     *
      * @param page - Playwright page instance to capture the DOM from
      * @param originalSelector - The selector that failed
      * @param error - The error that occurred during the failed interaction
@@ -147,30 +205,58 @@ export class HealingEngine {
             `[HealingEngine:heal] 🔑 Available API keys: ${this.clientManager.getKeyCount()}, Current key index: ${this.clientManager.getCurrentKeyIndex()}`
         );
 
-        // 1. Capture simplified DOM — ONCE, before the retry loop.
-        // The DOM state is static within a single heal() call (the page hasn't
-        // navigated or been mutated between retries), so we cache the snapshot
-        // and reuse it across all retry / key-rotation / provider-failover attempts.
-        // This avoids redundant page.evaluate() calls on each retry.
-        logger.info(`[HealingEngine:heal] 📸 Step 1: Capturing simplified DOM (cached for all retries)...`);
-        const rawSnapshot = await getSimplifiedDOM(page);
-        const htmlSnapshot = rawSnapshot.substring(0, config.ai.healing.domSnapshotCharLimit);
-        logger.info(
-            `[HealingEngine:heal] 📊 DOM snapshot length: ${htmlSnapshot.length}/${rawSnapshot.length} chars (limit: ${config.ai.healing.domSnapshotCharLimit})`
-        );
-        logger.debug(`[HealingEngine:heal] DOM snapshot preview (first 500 chars): ${htmlSnapshot.substring(0, 500)}`);
-
-        // 2. Construct Prompt
-        logger.info(`[HealingEngine:heal] ✍️ Step 2: Constructing prompt...`);
-        const promptText = config.ai.prompts.healingPrompt(originalSelector, error.message, htmlSnapshot);
-        logger.info(`[HealingEngine:heal] 📏 Prompt length: ${promptText.length} chars`);
-        logger.debug(`[HealingEngine:heal] Prompt preview (first 300 chars): ${promptText.substring(0, 300)}`);
-
         let healingSuccess = false;
         let healingResult: HealingResult | null = null;
         let tokensUsed: { prompt: number; completion: number; total: number } | undefined;
+        // Declared outside the try so the `finally` block can always report the
+        // snapshot size, including on the paths that never got one.
+        let htmlSnapshot = '';
 
         try {
+            // 1. Capture simplified DOM — ONCE, before the retry loop.
+            // The DOM state is static within a single heal() call (the page hasn't
+            // navigated or been mutated between retries), so we cache the snapshot
+            // and reuse it across all retry / key-rotation / provider-failover attempts.
+            // This avoids redundant page.evaluate() calls on each retry.
+            //
+            // This capture sits *inside* the try deliberately. It used to run before
+            // it, so a `page.evaluate` rejection — a page closed or navigated while
+            // the heal was in flight, which is exactly when healing is most likely to
+            // be running — propagated straight out of `heal()`. That replaced the
+            // caller's original interaction error with an opaque DOM-capture error and
+            // skipped the `finally` block, so no `HealingEvent` was recorded either:
+            // the one failure mode where the original error matters most was the one
+            // that discarded it, and it was invisible to `HealingMetrics`.
+            logger.info(`[HealingEngine:heal] 📸 Step 1: Capturing simplified DOM (cached for all retries)...`);
+            // The serializer enforces the budget while it walks, so it can spend the
+            // allowance on whole elements and flag truncation. Clipping its output
+            // here instead (as this used to) would cut mid-tag and silently discard
+            // the truncation notice.
+            const charLimit = config.ai.healing.domSnapshotCharLimit;
+            try {
+                htmlSnapshot = await getSimplifiedDOM(page, charLimit);
+            } catch (snapshotError) {
+                // Logged distinctly so this is not mistaken for a model failure:
+                // the provider was never asked.
+                logger.error(
+                    `[HealingEngine:heal] 📷 DOM capture failed — cannot build a healing prompt: ${String(snapshotError)}`
+                );
+                throw snapshotError;
+            }
+            logger.info(
+                `[HealingEngine:heal] 📊 DOM snapshot length: ${htmlSnapshot.length} chars (limit: ${charLimit})` +
+                    `${htmlSnapshot.includes('DOM truncated') ? ' — TRUNCATED, model sees a partial page' : ''}`
+            );
+            logger.debug(
+                `[HealingEngine:heal] DOM snapshot preview (first 500 chars): ${htmlSnapshot.substring(0, 500)}`
+            );
+
+            // 2. Construct Prompt
+            logger.info(`[HealingEngine:heal] ✍️ Step 2: Constructing prompt...`);
+            const promptText = config.ai.prompts.healingPrompt(originalSelector, error.message, htmlSnapshot);
+            logger.info(`[HealingEngine:heal] 📏 Prompt length: ${promptText.length} chars`);
+            logger.debug(`[HealingEngine:heal] Prompt preview (first 300 chars): ${promptText.substring(0, 300)}`);
+
             // 3. Execute AI request with automatic retry / key rotation / provider failover
             logger.info(`[HealingEngine:heal] 🔁 Step 3: Starting AI request via RetryOrchestrator`);
             const orchestrator = new RetryOrchestrator(this.clientManager);

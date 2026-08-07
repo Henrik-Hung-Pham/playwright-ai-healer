@@ -107,7 +107,10 @@ TEST_TIMEOUT=120000
 HEADLESS=true
 
 # AI Healing (optional — defaults shown)
-DOM_SNAPSHOT_CHAR_LIMIT=12000  # Max chars of DOM sent to AI; must be >= 100 (serialiser caps at 15000)
+DOM_SNAPSHOT_CHAR_LIMIT=12000  # Max chars of DOM sent to AI; must be >= 100. This is the whole
+                               # budget — the serialiser enforces it while walking the tree and
+                               # appends an explicit `<!-- DOM truncated … -->` notice if it runs
+                               # out, so raising this value genuinely widens the model's view.
 HEALING_FAILURE_MODE=fail      # 'fail' (default) throws when healing cannot produce a usable
                                # selector; 'skip' calls test.skip() instead. Prefer 'fail' — a
                                # skipped test reports green, hiding a healer that never worked.
@@ -177,10 +180,12 @@ src/
 │   ├── BasePage.ts            # Abstract base page
 │   ├── BooksHomePage.ts       # Books to Scrape home page; category nav, pagination
 │   └── BookDetailPage.ts      # Book detail page; title, price, breadcrumbs
+├── reporters/
+│   └── HealingReporter.ts     # Merges per-worker healing shards → healing-report.json
 └── utils/
     ├── Environment.ts         # Multi-env loader
     ├── Logger.ts              # Winston wrapper
-    ├── CircuitBreaker.ts      # Per-provider circuit breaker (opens after 5 failures)
+    ├── CircuitBreaker.ts      # Per-provider circuit breaker (opens after 5 failures; shared per worker process)
     ├── HealingMetrics.ts      # Per-key selector failure/heal event tracking
     ├── LocatorAdapter.ts      # Pluggable storage: FileAdapter | SQLiteAdapter
     ├── LocatorManager.ts      # Selector persistence (facade over LocatorAdapter) + stability metrics
@@ -261,6 +266,14 @@ async click(selector: string) {
 
 _Note: If the primary AI Provider (e.g. Gemini) hits a 4xx Rate Limit error, the `AutoHealer` automatically detects the quota failure and falls back to an alternate AI Provider (e.g. OpenAI) if configured!_
 
+### ⚡ Circuit Breaker
+
+When a provider fails 5 times consecutively, its circuit opens and further healing attempts **fast-fail** without spending an API call. After 60s the breaker half-opens and lets one probe through; success closes it, failure reopens it immediately.
+
+Breakers live in a **module-scoped registry keyed by provider**, so all `HealingEngine` instances in a process share them. This matters because an engine is built per `AutoHealer`, which the Playwright fixture builds **per test** — when the registry was an instance field, the failure count reset at every test boundary and, against a threshold of 5, the breaker could essentially never open.
+
+Scope is the **worker process**: Playwright workers are separate processes with no shared memory, so each detects an outage independently. With N workers, up to N × 5 requests are spent before all have opened. Coordinating across workers would require out-of-process state and is deliberately not attempted.
+
 ### 🧭 Keeping page objects on the healing path
 
 `safeClick()` accepts either a **selector string** or a pre-built Playwright **`Locator`**. Only the string form can heal — a `Locator` has already resolved to an element and carries no selector text for the AI to repair, so `BasePage` clicks it directly and `AutoHealer` never runs.
@@ -297,6 +310,29 @@ const results = await healer.healAll([
 ]);
 // results: HealAllResult[] — per-operation outcome, healed selector, and error
 ```
+
+### 📊 Healing Report
+
+Every Playwright run now writes `test-results/healing-report.json` and prints a summary:
+
+```
+🏥 Healing report
+   Attempts      12 (11 healed, 1 failed)
+   Success rate  91.7%
+   Avg heal time 1840ms
+   Tokens used   9310
+   gemini        11/12 succeeded
+   ↳ #nonexistent-book-card-xyz → article.product_pod >> nth=0 (×2)
+   Written to test-results/healing-report.json
+```
+
+`HealingMetrics` is a per-process singleton, but Playwright runs tests in **worker processes** while reporters run in the **main process** — so a reporter cannot read the workers' in-memory events directly. The flow is:
+
+1. `HealingEngine` records each `HealingEvent` into its worker's `HealingMetrics`.
+2. The worker-scoped `healingMetricsShard` fixture flushes that worker's events to `test-results/healing-metrics/worker-<index>-<pid>.json` on teardown.
+3. `HealingReporter` merges every shard in `onEnd` and writes the run-wide report.
+
+CI uploads the JSON as a `healing-report-*` artifact per matrix shard. A malformed shard is skipped with a warning — a metrics artifact must never be the reason a green run goes red.
 
 ### 🎯 Healing Accuracy Benchmark
 
