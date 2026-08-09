@@ -151,7 +151,7 @@ export class AutoHealer {
             if (locatorKey) {
                 await locatorManager.recordSelectorFailure(locatorKey);
             }
-            const result = await this.heal(selector, error as Error);
+            const result = await this.heal(selector, error as Error, locatorKey);
             if (result) {
                 logger.info(`[AutoHealer] 🔄 Retrying with new selector: ${result.selector}`);
 
@@ -377,7 +377,7 @@ export class AutoHealer {
         );
 
         // -- Phase 2: heal all failures concurrently ----
-        const healed = await Promise.allSettled(failures.map(f => this.heal(f.selector, f.error)));
+        const healed = await Promise.allSettled(failures.map(f => this.heal(f.selector, f.error, f.locatorKey)));
 
         // -- Phase 3: retry healed operations sequentially ----
         for (let j = 0; j < failures.length; j++) {
@@ -534,7 +534,15 @@ export class AutoHealer {
      * Delegates healing to the {@link HealingEngine}.
      * @private
      */
-    private async heal(originalSelector: string, error: Error): Promise<HealingResult | null> {
-        return this.healingEngine.heal(this.page, originalSelector, error);
+    private async heal(
+        originalSelector: string,
+        error: Error,
+        locatorKey?: string | null
+    ): Promise<HealingResult | null> {
+        // The last-known-good fingerprint is what lets the engine rank candidates
+        // on element identity rather than on selector shape alone. Only keyed
+        // selectors have one — an inline selector string has nowhere to store it.
+        const knownGood = locatorKey ? LocatorManager.getInstance().getFingerprint(locatorKey) : null;
+        return this.healingEngine.heal(this.page, originalSelector, error, knownGood);
     }
 }
