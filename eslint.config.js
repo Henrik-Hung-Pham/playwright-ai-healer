@@ -53,6 +53,11 @@ export default tseslint.config(
             'coverage/',
             '.claude/',
             '.gitnexus/',
+            // Generated TypeDoc output. `npm run docs` emits browser-targeted
+            // bundles whose `window`/`document`/`navigator` references trip
+            // `no-undef` under this Node-oriented config — 361 errors from code
+            // nobody wrote.
+            'docs/',
         ],
     }
 );
