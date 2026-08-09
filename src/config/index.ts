@@ -52,6 +52,10 @@ const envSchema = z.object({
         .transform(val => val !== 'false'),
     LOCATOR_STORE: z.enum(['file', 'sqlite']).default('file'),
     HEALING_FAILURE_MODE: z.enum(['fail', 'skip']).default('fail'),
+    // Revert a healed selector once it has failed this many times since the heal.
+    // 0 disables. Default 3: enough that a flaky run does not trigger it, few
+    // enough that a wrong heal does not persist across a whole CI day.
+    HEALING_AUTO_REVERT_AFTER: z.string().default('3').transform(Number).pipe(z.number().int().min(0)),
 });
 
 type AppConfig = {
@@ -70,6 +74,8 @@ type AppConfig = {
             confidenceThreshold: number;
             domSnapshotCharLimit: number;
             failureMode: 'fail' | 'skip';
+            /** Revert a healed selector after this many post-heal failures. 0 disables. */
+            autoRevertAfter: number;
         };
         security: { vercelChallengePath: string };
         prompts: { healingPrompt: (selector: string, error: string, html: string) => string };
@@ -136,6 +142,7 @@ function buildConfig(): AppConfig {
                 confidenceThreshold: 0.7,
                 domSnapshotCharLimit: env.DOM_SNAPSHOT_CHAR_LIMIT,
                 failureMode: env.HEALING_FAILURE_MODE,
+                autoRevertAfter: env.HEALING_AUTO_REVERT_AFTER,
             },
             security: {
                 vercelChallengePath: '.well-known/vercel/security/request-challenge',

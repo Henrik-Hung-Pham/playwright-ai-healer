@@ -228,6 +228,51 @@ export interface SelectorMetrics {
     lastFailedAt?: string;
     /** ISO 8601 timestamp of the most recent healing event. */
     healedAt?: string;
+    /**
+     * Heals applied to this key, oldest first, capped at
+     * {@link MAX_PROVENANCE_ENTRIES}.
+     *
+     * Without this the locator store is a destructive overwrite: `updateLocator`
+     * replaces a human-authored selector with a model-authored one and the
+     * original is gone. Nothing records what it was, which model proposed the
+     * replacement, or how confident the scorer was — so a bad heal cannot be
+     * reviewed after the fact and cannot be undone.
+     */
+    history?: HealProvenance[];
+}
+
+/**
+ * How many heals are retained per key before the oldest is evicted.
+ *
+ * Deep history has no consumer — a revert only ever needs the most recent
+ * entry — while an unbounded array would grow `metrics.json` without limit
+ * across long-lived branches.
+ */
+export const MAX_PROVENANCE_ENTRIES = 10;
+
+/**
+ * A single recorded heal: what was replaced, with what, by whom, and on what evidence.
+ *
+ * This is the audit trail that makes an AI-authored selector reviewable. Every
+ * field is something a human needs in order to decide whether to keep the heal:
+ * the previous value to compare against, the model to attribute it to, and the
+ * score to judge how much the framework trusted it.
+ */
+export interface HealProvenance {
+    /** The selector that was replaced — the value `revertLocator` restores. */
+    previousSelector: string;
+    /** The selector that replaced it. */
+    healedSelector: string;
+    /** ISO 8601 timestamp of the heal. */
+    healedAt: string;
+    /** Provider that produced the replacement (`'gemini'` / `'openai'`). */
+    provider: string;
+    /** Model name that produced the replacement. */
+    model: string;
+    /** Confidence the scorer assigned (0–1). */
+    confidence: number;
+    /** Selector strategy detected in the replacement. */
+    strategy: SelectorStrategy;
 }
 
 /**

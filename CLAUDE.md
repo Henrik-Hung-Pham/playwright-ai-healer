@@ -85,6 +85,11 @@ Environment is selected by `TEST_ENV` variable (`dev`/`staging`/`prod`). The con
 - `GEMINI_API_KEY` — required if provider is `gemini`
 - `GEMINI_MODEL` — Gemini/Gemma model name (default: `gemma-4-31b-it`)
 - `OPENAI_API_KEY` / `OPENAI_API_KEYS` (comma-separated for rotation) — required if provider is `openai`
+- `HEALING_AUTO_REVERT_AFTER` (default: `3`, `0` disables) — number of post-heal failures after
+  which `LocatorManager` restores the selector the heal replaced. Every persisted heal records a
+  `HealProvenance` entry (previous selector, model, provider, confidence, strategy) in
+  `metrics.json`, which is what makes `revertLocator()` possible — before that, `updateLocator` was
+  a destructive overwrite with no way back.
 - `BASE_URL`, `LOG_LEVEL`, `HEADLESS`, `TEST_TIMEOUT`
 
 ### TypeScript Conventions

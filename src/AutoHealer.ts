@@ -18,6 +18,7 @@ import type {
     HealingEvent,
     HealOperation,
     HealAllResult,
+    HealProvenance,
 } from './types.js';
 
 /**
@@ -39,6 +40,9 @@ export class AutoHealer {
     private page: Page;
     private debug: boolean;
     private healingEngine: HealingEngine;
+    /** Retained so a persisted heal can be attributed to the model that produced it. */
+    private readonly provider: AIProvider;
+    private readonly modelName: string;
 
     /**
      * Creates an AutoHealer instance
@@ -63,6 +67,8 @@ export class AutoHealer {
         this.debug = debug;
         const resolvedModel =
             modelName || (provider === 'openai' ? config.ai.openai.modelName : config.ai.gemini.modelName);
+        this.provider = provider;
+        this.modelName = resolvedModel;
         const clientManager = new AIClientManager(apiKeys, provider, resolvedModel, debug);
         this.healingEngine = new HealingEngine(clientManager);
     }
@@ -166,7 +172,7 @@ export class AutoHealer {
                     if (locatorKey) {
                         logger.info(`[AutoHealer] 💾 Updating locator key '${locatorKey}' with new value.`);
                         await locatorManager.updateLocator(locatorKey, result.selector);
-                        await locatorManager.recordSelectorHealed(locatorKey);
+                        await locatorManager.recordSelectorHealed(locatorKey, this.buildProvenance(selector, result));
                     }
                 } catch (retryError) {
                     logger.error(`[AutoHealer] ❌ Failed to interact with healed selector: ${String(retryError)}`);
@@ -392,7 +398,10 @@ export class AutoHealer {
                     };
                     if (failure.locatorKey) {
                         await locatorManager.updateLocator(failure.locatorKey, newSelector);
-                        await locatorManager.recordSelectorHealed(failure.locatorKey);
+                        await locatorManager.recordSelectorHealed(
+                            failure.locatorKey,
+                            this.buildProvenance(failure.selector, healResult.value)
+                        );
                     }
                 } catch (retryErr) {
                     results[failure.index] = {
@@ -478,6 +487,30 @@ export class AutoHealer {
                 `Healed selector '${selector}' is ambiguous — resolved to ${count} elements (expected exactly 1).`
             );
         }
+    }
+
+    /**
+     * Assemble the audit record stored alongside a persisted heal.
+     *
+     * `updateLocator` is a destructive overwrite — the human-authored selector is
+     * replaced in place. This captures what it was, which model replaced it, and
+     * how confident the scorer was, so the change is reviewable afterwards and
+     * `LocatorManager.revertLocator` has something to restore.
+     *
+     * @param previousSelector - The selector being replaced.
+     * @param result - The accepted heal.
+     * @private
+     */
+    private buildProvenance(previousSelector: string, result: HealingResult): HealProvenance {
+        return {
+            previousSelector,
+            healedSelector: result.selector,
+            healedAt: new Date().toISOString(),
+            provider: this.provider,
+            model: this.modelName,
+            confidence: result.confidence,
+            strategy: result.strategy,
+        };
     }
 
     /**

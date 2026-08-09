@@ -658,7 +658,16 @@ describe('AutoHealer', () => {
             await healer.healAll([{ selectorOrKey: 'app.btn', action: 'click' }]);
 
             expect(mockLocatorManager.updateLocator).toHaveBeenCalledWith('app.btn', '#healed-selector');
-            expect(mockLocatorManager.recordSelectorHealed).toHaveBeenCalledWith('app.btn');
+            // The heal is recorded with its audit trail, so it can be reviewed and reverted.
+            expect(mockLocatorManager.recordSelectorHealed).toHaveBeenCalledWith(
+                'app.btn',
+                expect.objectContaining({
+                    previousSelector: '#old-selector',
+                    healedSelector: '#healed-selector',
+                    provider: 'gemini',
+                    strategy: 'id',
+                })
+            );
         });
 
         it('should handle hover action in runOperation', async () => {

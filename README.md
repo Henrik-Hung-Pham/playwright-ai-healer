@@ -114,6 +114,11 @@ DOM_SNAPSHOT_CHAR_LIMIT=12000  # Max chars of DOM sent to AI; must be >= 100. Th
 HEALING_FAILURE_MODE=fail      # 'fail' (default) throws when healing cannot produce a usable
                                # selector; 'skip' calls test.skip() instead. Prefer 'fail' — a
                                # skipped test reports green, hiding a healer that never worked.
+HEALING_AUTO_REVERT_AFTER=3    # Revert a healed selector once it has failed this many times since
+                               # the heal; 0 disables. A healed selector that keeps failing is the
+                               # clearest evidence available that the heal was wrong, so the store
+                               # rolls back to the selector it replaced instead of accumulating
+                               # failures against a bad value.
 
 # Locator Storage Backend
 LOCATOR_STORE=file    # 'file' (default, JSON + lockfile) or 'sqlite' (ACID SQLite)
