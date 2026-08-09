@@ -17,6 +17,19 @@ export function parseAIResponse(raw: string | undefined): string | null {
     if (!text) return null;
     if (text === 'FAIL') return null;
 
+    // A reasoning model states its verdict last. When that verdict is FAIL,
+    // honour it *before* consulting the candidate pools below — those scan the
+    // whole response, and models routinely quote the **original broken
+    // selector** while reasoning ("Original Selector: `#site-search`"). Picking
+    // that up turns an explicit refusal into a confident answer that is, by
+    // construction, the selector which just failed.
+    //
+    // Observed against gemma-4-31b-it in the healing benchmark: a reply ending
+    // `… I must return "FAIL".FAIL` parsed as `#site-search`. It was rejected
+    // downstream only because that selector happened to resolve to 0 elements —
+    // had it still matched anything, healing would have reported success.
+    if (endsWithFailVerdict(text)) return null;
+
     // Fenced blocks are lifted out first. Their backticks would otherwise skew
     // the inline-span pairing below — a fence contributes three consecutive
     // backticks, which offsets every subsequent pair so that a "span" can match
@@ -55,6 +68,25 @@ export function parseAIResponse(raw: string | undefined): string | null {
     if (result === 'FAIL') return null;
 
     return result || null;
+}
+
+/**
+ * Does the response end on a FAIL verdict?
+ *
+ * Matches a trailing standalone `FAIL` token, tolerating the punctuation and
+ * quoting models wrap it in (`"FAIL".`, `**FAIL**`, `FAIL`).
+ *
+ * The `isSelectorLike` escape hatch keeps a genuine selector that merely ends in
+ * the token — `.badge.FAIL`, `[data-status="FAIL"]` — from being read as a
+ * refusal. Prose cannot reach that branch: a line of reasoning is rejected by
+ * the markdown/sentence heuristics `isSelectorLike` already applies.
+ */
+function endsWithFailVerdict(text: string): boolean {
+    const lines = splitLines(text);
+    const last = lines[lines.length - 1];
+    if (last === undefined) return false;
+    if (!/(?:^|[^\w-])FAIL[\s."'`*)\]]*$/.test(last)) return false;
+    return !isSelectorLike(last);
 }
 
 /** Split into trimmed, non-empty lines. */
