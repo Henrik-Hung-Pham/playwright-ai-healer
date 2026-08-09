@@ -85,6 +85,13 @@ Environment is selected by `TEST_ENV` variable (`dev`/`staging`/`prod`). The con
 - `GEMINI_API_KEY` — required if provider is `gemini`
 - `GEMINI_MODEL` — Gemini/Gemma model name (default: `gemma-4-31b-it`)
 - `OPENAI_API_KEY` / `OPENAI_API_KEYS` (comma-separated for rotation) — required if provider is `openai`
+- `HEALING_MODE=off|suggest|apply` (default: `apply`) — how far a failed interaction may travel.
+  `off` disables healing entirely: nothing is sent to a provider and no API key is required, so it
+  is the graceful kill switch (unsetting the key instead makes `resolveAIProvider` throw and aborts
+  the run). `suggest` heals, scores, and records — but does not retry the action and does not
+  persist; the test still fails with its original error and the proposal is attached as a
+  `healing-suggestion` annotation. Prefer `suggest` in CI: under `apply` a heal that succeeds
+  against a genuinely broken feature reports green while the feature was never exercised.
 - `BASE_URL`, `LOG_LEVEL`, `HEADLESS`, `TEST_TIMEOUT`
 
 ### TypeScript Conventions

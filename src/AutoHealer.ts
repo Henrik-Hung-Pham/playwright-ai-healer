@@ -142,11 +142,31 @@ export class AutoHealer {
             }
             await actionFn(selector);
         } catch (error) {
+            // `off` short-circuits before anything else: no failure is recorded,
+            // no DOM snapshot is taken, and no request leaves the process. The
+            // caller sees exactly the error Playwright raised, as though
+            // AutoHealer were not in the call stack at all.
+            if (config.ai.healing.mode === 'off') {
+                logger.debug(`[AutoHealer] Healing disabled (HEALING_MODE=off); propagating original error.`);
+                throw error;
+            }
+
             logger.warn(`[AutoHealer] 💥 ${actionName} failed on: ${selector}. Initiating healing protocol...`);
             if (locatorKey) {
                 await locatorManager.recordSelectorFailure(locatorKey);
             }
             const result = await this.heal(selector, error as Error);
+
+            // `suggest` diagnoses without repairing: the heal has already been
+            // scored and recorded by HealingEngine, but the action is not retried
+            // and nothing is written to the locator store. The original error is
+            // rethrown so a genuinely broken feature still fails the test instead
+            // of being papered over by a plausible substitute element.
+            if (config.ai.healing.mode === 'suggest') {
+                this.reportSuggestion(selector, actionName, result);
+                throw error;
+            }
+
             if (result) {
                 logger.info(`[AutoHealer] 🔄 Retrying with new selector: ${result.selector}`);
 
@@ -358,7 +378,7 @@ export class AutoHealer {
                 await this.runOperation(op, selector);
                 results[i] = { selectorOrKey: op.selectorOrKey, success: true };
             } catch (err) {
-                if (locatorKey) {
+                if (config.ai.healing.mode !== 'off' && locatorKey) {
                     await locatorManager.recordSelectorFailure(locatorKey);
                 }
                 failures.push({ index: i, op, selector, locatorKey, error: err as Error });
@@ -367,12 +387,47 @@ export class AutoHealer {
 
         if (failures.length === 0) return results;
 
+        // `off`: report the failures as-is. Unlike the single-action path there is
+        // no exception to propagate — healAll reports per-operation results — so
+        // each failure is returned with its original error.
+        if (config.ai.healing.mode === 'off') {
+            logger.debug(`[AutoHealer:healAll] Healing disabled (HEALING_MODE=off); reporting failures unhealed.`);
+            for (const failure of failures) {
+                results[failure.index] = {
+                    selectorOrKey: failure.op.selectorOrKey,
+                    success: false,
+                    error: String(failure.error),
+                };
+            }
+            return results;
+        }
+
         logger.info(
             `[AutoHealer:healAll] ⚡ ${failures.length} operation(s) failed — firing AI healing in parallel...`
         );
 
         // -- Phase 2: heal all failures concurrently ----
         const healed = await Promise.allSettled(failures.map(f => this.heal(f.selector, f.error)));
+
+        // `suggest`: the heals above are scored and recorded, but no operation is
+        // retried and no selector is persisted. Each failure keeps its original
+        // error and carries the proposed selector for inspection.
+        if (config.ai.healing.mode === 'suggest') {
+            for (let j = 0; j < failures.length; j++) {
+                const failure = failures[j];
+                const healResult = healed[j];
+                if (!failure) continue;
+                const suggestion = healResult?.status === 'fulfilled' && healResult.value ? healResult.value : null;
+                this.reportSuggestion(failure.selector, failure.op.action, suggestion);
+                results[failure.index] = {
+                    selectorOrKey: failure.op.selectorOrKey,
+                    success: false,
+                    ...(suggestion ? { healedSelector: suggestion.selector } : {}),
+                    error: String(failure.error),
+                };
+            }
+            return results;
+        }
 
         // -- Phase 3: retry healed operations sequentially ----
         for (let j = 0; j < failures.length; j++) {
@@ -477,6 +532,38 @@ export class AutoHealer {
             throw new Error(
                 `Healed selector '${selector}' is ambiguous — resolved to ${count} elements (expected exactly 1).`
             );
+        }
+    }
+
+    /**
+     * Surface a `suggest`-mode heal without applying it.
+     *
+     * Logs the suggestion and attaches it as a Playwright annotation so it shows
+     * up next to the failure in the HTML report — the point of the mode is that
+     * the diagnosis travels with the failing test rather than being buried in
+     * worker logs. The `HealingEvent` itself was already recorded by
+     * `HealingEngine`, so the healing report picks it up regardless.
+     *
+     * @param originalSelector - The selector that failed.
+     * @param actionName - The interaction that failed, for the message.
+     * @param result - The scored heal, or `null` when none was found.
+     * @private
+     */
+    private reportSuggestion(originalSelector: string, actionName: string, result: HealingResult | null): void {
+        const description = result
+            ? `[AutoHealer] HEALING_MODE=suggest — not applied. ${actionName} on '${originalSelector}' ` +
+              `would heal to '${result.selector}' (confidence=${result.confidence}, strategy=${result.strategy}). ` +
+              `Set HEALING_MODE=apply to use it.`
+            : `[AutoHealer] HEALING_MODE=suggest — no replacement selector found for '${originalSelector}'.`;
+
+        logger.warn(description);
+
+        // Annotations are only available inside a Playwright test context. A
+        // direct API consumer still gets the log line above.
+        try {
+            test.info().annotations.push({ type: 'healing-suggestion', description });
+        } catch {
+            /* not running under Playwright — the log line is the whole report */
         }
     }
 

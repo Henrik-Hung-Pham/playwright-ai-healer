@@ -23,6 +23,9 @@ vi.mock('./config/index.js', () => ({
                 apiKey: undefined,
             },
             healing: {
+                // Mutable so a test can drive the mode without re-mocking the
+                // whole config module. Tests that change it must restore it.
+                mode: 'apply' as 'off' | 'suggest' | 'apply',
                 maxRetries: 3,
                 retryDelay: 5000,
                 confidenceThreshold: 0.7,
