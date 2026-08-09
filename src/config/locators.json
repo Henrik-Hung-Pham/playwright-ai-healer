@@ -1,7 +1,4 @@
 {
-  "test": {
-    "concurrentString": "value-0"
-  },
   "booksToScrape": {
     "categoryLink": ".side_categories ul li ul li a",
     "bookCard": "article.product_pod",
