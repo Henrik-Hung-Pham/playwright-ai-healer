@@ -1,18 +1,36 @@
 import type { Page } from '@playwright/test';
 
 /**
+ * Fallback character budget for the AI-facing DOM snapshot.
+ *
+ * Callers normally pass `config.ai.healing.domSnapshotCharLimit` so the budget
+ * is driven by the `DOM_SNAPSHOT_CHAR_LIMIT` env var. This default exists only
+ * for direct callers that have no config in scope (e.g. unit tests); keeping
+ * the limit a parameter rather than a constant baked into the `page.evaluate`
+ * closure is what lets the env var *raise* the window, not merely lower it.
+ */
+export const DEFAULT_DOM_SNAPSHOT_CHAR_LIMIT = 15000;
+
+/**
  * Captures a minimal DOM snapshot focused on interactive/actionable elements.
  * Ancestors get minimal structural info (tag + id only).
  * Interactive elements get full attributes + text.
- * Output is hard-capped at 15,000 characters.
+ *
+ * Output is capped at `maxChars` characters. When the budget is reached the
+ * snapshot ends with an explicit truncation comment, so a caller (and the model)
+ * can tell a complete page from a clipped one.
  *
  * @param page - Playwright page instance
+ * @param maxChars - Character budget for the snapshot. Defaults to
+ *   {@link DEFAULT_DOM_SNAPSHOT_CHAR_LIMIT}; production callers pass
+ *   `config.ai.healing.domSnapshotCharLimit`.
  * @returns Simplified HTML string suitable for AI selector healing
  */
-export async function getSimplifiedDOM(page: Page): Promise<string> {
-    return await page.evaluate(() => {
-        const MAX_OUTPUT_CHARS = 15000;
-
+export async function getSimplifiedDOM(
+    page: Page,
+    maxChars: number = DEFAULT_DOM_SNAPSHOT_CHAR_LIMIT
+): Promise<string> {
+    return await page.evaluate((MAX_OUTPUT_CHARS: number) => {
         const scrubPII = (text: string): string => {
             const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
             const phoneRegex = /(\+\d{1,3}[- ]?)?\(?\d{3}\)?[- ]?\d{3}[- ]?\d{4}/g;
@@ -116,6 +134,19 @@ export async function getSimplifiedDOM(page: Page): Promise<string> {
         let charCount = 0;
         let budgetExceeded = false;
 
+        /**
+         * Charge `n` characters against the budget.
+         * @returns `false` once the budget has been exhausted.
+         */
+        const charge = (n: number): boolean => {
+            charCount += n;
+            if (charCount > MAX_OUTPUT_CHARS) {
+                budgetExceeded = true;
+                return false;
+            }
+            return true;
+        };
+
         const serializeNode = (node: Element, depth: number): string => {
             if (budgetExceeded) return '';
             const tagName = node.tagName.toLowerCase();
@@ -123,9 +154,11 @@ export async function getSimplifiedDOM(page: Page): Promise<string> {
 
             const isInteractive = interactiveSet.has(node);
             const indent = '  '.repeat(Math.min(depth, 4));
-            let html = `${indent}<${tagName}${serializeAttrs(node, isInteractive)}>`;
+            const openTag = `${indent}<${tagName}${serializeAttrs(node, isInteractive)}>`;
+            const closeTag = `</${tagName}>`;
 
             // Only include text for interactive elements (not ancestors)
+            let ownText = '';
             if (isInteractive) {
                 const directText: string[] = [];
                 node.childNodes.forEach(child => {
@@ -137,10 +170,21 @@ export async function getSimplifiedDOM(page: Page): Promise<string> {
                         }
                     }
                 });
-                if (directText.length > 0) {
-                    html += directText.join(' ');
-                }
+                ownText = directText.join(' ');
             }
+
+            // Charge only THIS node's own markup against the budget.
+            //
+            // This previously charged `html.length` *after* composing the whole
+            // subtree, so every descendant's characters were counted again at
+            // each ancestor level. The budget therefore shrank as DOM depth grew:
+            // against a nominal 15 000-char cap, a flat page emitted ~8 400 chars
+            // but an 8-deep one emitted only ~2 600 — and since real applications
+            // nest far deeper than fixtures do, healing silently ran on a small
+            // fraction of the page it was supposed to see.
+            if (!charge(openTag.length + ownText.length + closeTag.length)) return '';
+
+            let html = openTag + ownText;
 
             // Collect needed children
             const neededChildren: Element[] = [];
@@ -170,21 +214,18 @@ export async function getSimplifiedDOM(page: Page): Promise<string> {
                     if (run >= 3) {
                         html += serializeNode(child, depth + 1) + '\n';
                         html += serializeNode(neededChildren[i + 1]!, depth + 1) + '\n';
-                        html += `${'  '.repeat(Math.min(depth + 1, 4))}<!-- ...${run - 2} more <${childTag}> -->\n`;
+                        const collapsed = `${'  '.repeat(Math.min(depth + 1, 4))}<!-- ...${run - 2} more <${childTag}> -->\n`;
+                        charge(collapsed.length);
+                        html += collapsed;
                         i += run;
                     } else {
                         html += serializeNode(child, depth + 1) + '\n';
                         i++;
                     }
                 }
-                html += `${indent}</${tagName}>`;
+                html += `${indent}${closeTag}`;
             } else {
-                html += `</${tagName}>`;
-            }
-
-            charCount += html.length;
-            if (charCount > MAX_OUTPUT_CHARS) {
-                budgetExceeded = true;
+                html += closeTag;
             }
 
             return html;
@@ -193,9 +234,16 @@ export async function getSimplifiedDOM(page: Page): Promise<string> {
         // ── Step 3: Serialize and enforce budget ──
         let result = serializeNode(document.body, 0);
 
-        // Hard-cap the output
+        // A snapshot can come up short two independent ways: the incremental
+        // budget tripping part-way through the walk, or the composed string
+        // overshooting the cap. Only the second used to be marked, so a
+        // budget-limited snapshot reached the model looking complete — the model
+        // then confidently healed against a page it could not fully see.
+        const TRUNCATION_NOTICE = '\n<!-- DOM truncated at budget limit: some elements omitted -->';
         if (result.length > MAX_OUTPUT_CHARS) {
-            result = result.substring(0, MAX_OUTPUT_CHARS) + '\n<!-- DOM truncated at budget limit -->';
+            result = result.substring(0, MAX_OUTPUT_CHARS) + TRUNCATION_NOTICE;
+        } else if (budgetExceeded) {
+            result += TRUNCATION_NOTICE;
         }
 
         // ── Step 4: Fallback if no interactive elements found ──
@@ -225,5 +273,5 @@ export async function getSimplifiedDOM(page: Page): Promise<string> {
         }
 
         return result;
-    });
+    }, maxChars);
 }

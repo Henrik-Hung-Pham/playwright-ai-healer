@@ -4,14 +4,16 @@ import type { Page } from '@playwright/test';
 import { getSimplifiedDOM } from './DOMSerializer.js';
 
 /**
- * The real DOMSerializer runs its logic inside `page.evaluate(fn)`. Under jsdom
- * we can execute that same callback against the live `document`, so this fake
- * Page simply invokes the callback — exercising the real serialization code.
+ * The real DOMSerializer runs its logic inside `page.evaluate(fn, arg)`. Under
+ * jsdom we can execute that same callback against the live `document`, so this
+ * fake Page simply invokes the callback — exercising the real serialization
+ * code. The serialized argument (the char budget) is forwarded just as
+ * Playwright would.
  */
 function pageFromHtml(html: string): Page {
     document.body.innerHTML = html;
     return {
-        evaluate: (fn: () => string) => Promise.resolve(fn()),
+        evaluate: (fn: (arg: number) => string, arg: number) => Promise.resolve(fn(arg)),
     } as unknown as Page;
 }
 
@@ -107,5 +109,73 @@ describe('getSimplifiedDOM', () => {
         expect(dom).toContain('[EMAIL]');
         expect(dom).not.toContain('jane.doe@example.com');
         expect(dom).not.toContain('bad()');
+    });
+});
+
+describe('getSimplifiedDOM character budget', () => {
+    /**
+     * Build `count` interactive elements nested `depth` levels deep.
+     *
+     * Every wrapper gets a distinct class so the serializer's repeated-sibling
+     * collapsing does not fire — that feature is what we want held constant
+     * while depth varies, so the budget itself is what is under test.
+     */
+    function nestedDom(count: number, depth: number): string {
+        let html = '';
+        for (let i = 0; i < count; i++) {
+            const open = `<div class="wrap-${i}-lvl">`.repeat(depth);
+            html += `${open}<button id="btn-${i}" class="action-${i}" type="button">Action ${i}</button>${'</div>'.repeat(depth)}`;
+        }
+        return html;
+    }
+
+    it('spends the budget on real output regardless of DOM depth', async () => {
+        const limit = 8000;
+
+        // Regression guard. The budget used to be charged the fully-composed
+        // subtree at every ancestor level, so each descendant was counted once
+        // per level of nesting and the usable allowance collapsed as depth grew
+        // (~8 400 chars emitted at depth 1 vs ~2 600 at depth 8 against the same
+        // cap). Real applications nest far deeper than fixtures, so the deepest
+        // pages — the ones healing needs most context for — got the least.
+        const sizes: number[] = [];
+        for (const depth of [1, 2, 4, 8]) {
+            const dom = await getSimplifiedDOM(pageFromHtml(nestedDom(400, depth)), limit);
+            expect(dom.length).toBeLessThanOrEqual(limit + 100); // + truncation notice
+            sizes.push(dom.length);
+        }
+
+        // Every depth must use most of the allowance, and the deepest must not
+        // fall off a cliff relative to the shallowest.
+        for (const size of sizes) {
+            expect(size).toBeGreaterThan(limit * 0.8);
+        }
+        const deepest = sizes[sizes.length - 1]!;
+        const shallowest = sizes[0]!;
+        expect(deepest).toBeGreaterThan(shallowest * 0.85);
+    });
+
+    it('marks the snapshot when the budget cut it short', async () => {
+        const dom = await getSimplifiedDOM(pageFromHtml(nestedDom(400, 4)), 3000);
+
+        // Without this notice the model cannot distinguish a complete page from
+        // a clipped one, and neither can anyone reading the healing logs.
+        expect(dom).toContain('DOM truncated at budget limit');
+    });
+
+    it('leaves a page that fits well within budget unmarked', async () => {
+        const dom = await getSimplifiedDOM(pageFromHtml('<button id="only">Go</button>'), 8000);
+
+        expect(dom).toContain('id="only"');
+        expect(dom).not.toContain('DOM truncated');
+    });
+
+    it('honours a budget larger than the former hard-coded 15 000 ceiling', async () => {
+        // `DOM_SNAPSHOT_CHAR_LIMIT` used to be applied *after* a 15 000-char cap
+        // baked into the page.evaluate closure, so raising it above 15 000 had no
+        // effect and the env var could only ever shrink the window.
+        const dom = await getSimplifiedDOM(pageFromHtml(nestedDom(2000, 2)), 24000);
+
+        expect(dom.length).toBeGreaterThan(15000);
     });
 });

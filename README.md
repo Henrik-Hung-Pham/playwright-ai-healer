@@ -88,12 +88,14 @@ Create a `.env.prod` file (or copy from `.env.example`):
 ENV=prod
 BASE_URL=https://books.toscrape.com/
 
-# AI Provider (gemini or openai)
+# AI Provider (gemini or openai) — decides which provider is used, on its own.
+# Keys for both may be present; only the selected provider's key is read, and
+# startup fails fast if that provider has no key.
 AI_PROVIDER=gemini
 GEMINI_API_KEY=your_gemini_key_here
 GEMINI_MODEL=gemma-4-31b-it
 
-# Or use OpenAI
+# Or use OpenAI (set AI_PROVIDER=openai — supplying a key alone does not switch provider)
 OPENAI_API_KEY=sk-your-openai-key
 OPENAI_MODEL=gpt-4o
 
@@ -105,7 +107,10 @@ TEST_TIMEOUT=120000
 HEADLESS=true
 
 # AI Healing (optional — defaults shown)
-DOM_SNAPSHOT_CHAR_LIMIT=12000  # Max chars of DOM sent to AI; must be >= 100 (serialiser caps at 15000)
+DOM_SNAPSHOT_CHAR_LIMIT=12000  # Max chars of DOM sent to AI; must be >= 100. This is the whole
+                               # budget — the serialiser enforces it while walking the tree and
+                               # appends an explicit `<!-- DOM truncated … -->` notice if it runs
+                               # out, so raising this value genuinely widens the model's view.
 HEALING_FAILURE_MODE=fail      # 'fail' (default) throws when healing cannot produce a usable
                                # selector; 'skip' calls test.skip() instead. Prefer 'fail' — a
                                # skipped test reports green, hiding a healer that never worked.
@@ -166,6 +171,7 @@ src/
 │   ├── RetryOrchestrator.ts   # Exponential backoff with jitter for AI retries
 │   ├── DOMSerializer.ts       # getSimplifiedDOM() — interactive-element snapshot
 │   ├── ResponseParser.ts      # parseAIResponse() — cleans raw AI output
+│   ├── ProviderResolver.ts    # resolveAIProvider() — AI_PROVIDER → keys + model
 │   ├── SelectorValidator.ts   # Denylist/allowlist guard for AI-returned selectors
 │   └── index.ts               # Barrel re-export
 ├── config/
@@ -181,7 +187,7 @@ src/
 └── utils/
     ├── Environment.ts         # Multi-env loader
     ├── Logger.ts              # Winston wrapper
-    ├── CircuitBreaker.ts      # Per-provider circuit breaker (opens after 5 failures)
+    ├── CircuitBreaker.ts      # Per-provider circuit breaker (opens after 5 failures; shared per worker process)
     ├── HealingMetrics.ts      # Per-key selector failure/heal event tracking
     ├── LocatorAdapter.ts      # Pluggable storage: FileAdapter | SQLiteAdapter
     ├── LocatorManager.ts      # Selector persistence (facade over LocatorAdapter) + stability
@@ -262,6 +268,14 @@ async click(selector: string) {
 ```
 
 _Note: If the primary AI Provider (e.g. Gemini) hits a 4xx Rate Limit error, the `AutoHealer` automatically detects the quota failure and falls back to an alternate AI Provider (e.g. OpenAI) if configured!_
+
+### ⚡ Circuit Breaker
+
+When a provider fails 5 times consecutively, its circuit opens and further healing attempts **fast-fail** without spending an API call. After 60s the breaker half-opens and lets one probe through; success closes it, failure reopens it immediately.
+
+Breakers live in a **module-scoped registry keyed by provider**, so all `HealingEngine` instances in a process share them. This matters because an engine is built per `AutoHealer`, which the Playwright fixture builds **per test** — when the registry was an instance field, the failure count reset at every test boundary and, against a threshold of 5, the breaker could essentially never open.
+
+Scope is the **worker process**: Playwright workers are separate processes with no shared memory, so each detects an outage independently. With N workers, up to N × 5 requests are spent before all have opened. Coordinating across workers would require out-of-process state and is deliberately not attempted.
 
 ### 🧭 Keeping page objects on the healing path
 

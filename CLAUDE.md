@@ -61,7 +61,7 @@ Test → BasePage.safeClick/safeFill
 | ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `src/AutoHealer.ts`                | Public healing API (`click`, `fill`, `hover`…) + `heal()` orchestration; records `HealingEvent[]`                                                                                                                                                                                                        |
 | `src/ai/AIClientManager.ts`        | Owns AI client lifecycle (OpenAI/Gemini), API key rotation, provider failover, and raw `makeRequest()` with timeout                                                                                                                                                                                      |
-| `src/ai/DOMSerializer.ts`          | `getSimplifiedDOM(page)` — focused snapshot of interactive elements for the AI prompt                                                                                                                                                                                                                    |
+| `src/ai/DOMSerializer.ts`          | `getSimplifiedDOM(page, maxChars)` — focused snapshot of interactive elements for the AI prompt, budget-capped per node                                                                                                                                                                                  |
 | `src/ai/ResponseParser.ts`         | `parseAIResponse()` — strips markdown fences, backticks, and quotes from raw AI output                                                                                                                                                                                                                   |
 | `src/config/index.ts`              | Centralized config validated with Zod; exports `config` object; loads `.env.{TEST_ENV}` via `Environment.ts`                                                                                                                                                                                             |
 | `src/config/locators.json`         | Persistent selector store; updated at runtime by `LocatorManager` when healing succeeds                                                                                                                                                                                                                  |
@@ -78,7 +78,10 @@ Test → BasePage.safeClick/safeFill
 
 Environment is selected by `TEST_ENV` variable (`dev`/`staging`/`prod`). The config loads `.env.{TEST_ENV}` first, then `.env` overrides. Required env vars are validated with Zod at startup:
 
-- `AI_PROVIDER=gemini|openai` (default: `gemini`)
+- `AI_PROVIDER=gemini|openai` (default: `gemini`) — the sole authority on which provider is used.
+  Resolved by `resolveAIProvider()` (`src/ai/ProviderResolver.ts`); keys for both providers may be
+  present, and only the selected provider's key and model are read. Never select a provider by
+  probing which key happens to be set — that bug shipped once already.
 - `GEMINI_API_KEY` — required if provider is `gemini`
 - `GEMINI_MODEL` — Gemini/Gemma model name (default: `gemma-4-31b-it`)
 - `OPENAI_API_KEY` / `OPENAI_API_KEYS` (comma-separated for rotation) — required if provider is `openai`
