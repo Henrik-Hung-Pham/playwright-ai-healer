@@ -37,8 +37,16 @@
         "test-automation",
         "ai"
     ],
-    "author": "",
+    "author": "Henrik (Hưng) Phạm",
     "license": "ISC",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/Henrik-Hung-Pham/playwright-ai-healer.git"
+    },
+    "bugs": {
+        "url": "https://github.com/Henrik-Hung-Pham/playwright-ai-healer/issues"
+    },
+    "homepage": "https://github.com/Henrik-Hung-Pham/playwright-ai-healer#readme",
     "engines": {
         "node": ">=24.0.0"
     },
