@@ -56,6 +56,10 @@ const envSchema = z.object({
     // back to the value it replaced. 1 would revert on the first flake; the default
     // of 3 requires a consistent pattern before discarding a heal.
     SELECTOR_QUARANTINE_THRESHOLD: z.string().default('3').transform(Number).pipe(z.number().int().min(1)),
+    // Wall-clock ceiling for one heal's AI round-trips — every attempt, backoff,
+    // key rotation, and provider switch together. Must leave room inside
+    // TEST_TIMEOUT for the original failed action and the retried one.
+    HEALING_BUDGET_MS: z.string().default('60000').transform(Number).pipe(z.number().int().min(1000)),
 });
 
 type AppConfig = {
@@ -71,6 +75,7 @@ type AppConfig = {
         healing: {
             maxRetries: number;
             retryDelay: number;
+            budgetMs: number;
             confidenceThreshold: number;
             domSnapshotCharLimit: number;
             failureMode: 'fail' | 'skip';
@@ -137,7 +142,10 @@ function buildConfig(): AppConfig {
             },
             healing: {
                 maxRetries: 3,
-                retryDelay: 5000,
+                // Backoff base unit. Was 5000 but never read — the orchestrator used
+                // its own 1000 default — so 1000 keeps the observed behaviour.
+                retryDelay: 1000,
+                budgetMs: env.HEALING_BUDGET_MS,
                 confidenceThreshold: 0.7,
                 domSnapshotCharLimit: env.DOM_SNAPSHOT_CHAR_LIMIT,
                 failureMode: env.HEALING_FAILURE_MODE,

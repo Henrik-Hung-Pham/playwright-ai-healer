@@ -116,6 +116,9 @@ HEALING_FAILURE_MODE=fail      # 'fail' (default) throws when healing cannot pro
                                # skipped test reports green, hiding a healer that never worked.
 SELECTOR_QUARANTINE_THRESHOLD=3  # Consecutive post-heal failures before a healed selector is
                                  # rolled back to the value it replaced. Must be >= 1.
+HEALING_BUDGET_MS=60000          # Wall-clock ceiling for one heal's AI round-trips (all retries,
+                                 # key rotations, and provider switches). Keep it well inside
+                                 # TEST_TIMEOUT. Must be >= 1000.
 
 # Locator Storage Backend
 LOCATOR_STORE=file    # 'file' (default, JSON + lockfile) or 'sqlite' (ACID SQLite)
