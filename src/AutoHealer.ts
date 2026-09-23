@@ -142,6 +142,13 @@ export class AutoHealer {
             }
             await actionFn(selector);
         } catch (error) {
+            if (!(await this.isBrokenSelector(selector))) {
+                logger.warn(
+                    `[AutoHealer] 🩺 ${actionName} failed on: ${selector}, but the selector still resolves to ` +
+                        `exactly one element — not a selector problem, so not healing.`
+                );
+                throw error;
+            }
             logger.warn(`[AutoHealer] 💥 ${actionName} failed on: ${selector}. Initiating healing protocol...`);
             if (locatorKey) {
                 const outcome = await locatorManager.recordSelectorFailure(locatorKey);
@@ -367,6 +374,12 @@ export class AutoHealer {
                 await this.runOperation(op, selector);
                 results[i] = { selectorOrKey: op.selectorOrKey, success: true };
             } catch (err) {
+                if (!(await this.isBrokenSelector(selector))) {
+                    // Same rule as executeAction: a selector that still resolves to one
+                    // element is not what failed, so there is nothing to heal.
+                    results[i] = { selectorOrKey: op.selectorOrKey, success: false, error: String(err) };
+                    continue;
+                }
                 if (locatorKey) {
                     await locatorManager.recordSelectorFailure(locatorKey);
                 }
@@ -457,6 +470,37 @@ export class AutoHealer {
                 const _exhaustive: never = op.action;
                 throw new Error(`[AutoHealer:runOperation] Unsupported action: ${_exhaustive}`);
             }
+        }
+    }
+
+    /**
+     * Decide whether a failed interaction is one a different selector could fix.
+     *
+     * Healing used to start on *any* error. That included failures where the
+     * selector was fine and the element was not: a disabled button, a click
+     * intercepted by an overlay, an element that never became visible, a
+     * `waitForSelector({ state: 'hidden' })` that timed out. In each case the
+     * model was asked for a *different* element, and a plausible substitute
+     * (another button, another input) turned a real product regression into a
+     * green test.
+     *
+     * A selector is only broken if it no longer identifies exactly one element:
+     * zero matches (it drifted) or several (strict-mode violation). If it still
+     * resolves to one element, the original error is the true failure and is
+     * rethrown unchanged.
+     *
+     * An unparseable selector is broken. A closed page is not: no selector can
+     * fix it, and healing would only replace the real error with a DOM-capture one.
+     *
+     * @param selector - The selector whose interaction just failed.
+     * @private
+     */
+    private async isBrokenSelector(selector: string): Promise<boolean> {
+        if (this.page.isClosed?.()) return false;
+        try {
+            return (await this.page.locator(selector).count()) !== 1;
+        } catch {
+            return true;
         }
     }
 
