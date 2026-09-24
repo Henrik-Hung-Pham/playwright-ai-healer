@@ -455,7 +455,7 @@ export class AutoHealer {
                 break;
             default: {
                 const _exhaustive: never = op.action;
-                throw new Error(`[AutoHealer:runOperation] Unsupported action: ${_exhaustive}`);
+                throw new Error(`[AutoHealer:runOperation] Unsupported action: ${String(_exhaustive)}`);
             }
         }
     }

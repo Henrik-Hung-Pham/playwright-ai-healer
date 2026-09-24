@@ -63,7 +63,7 @@ describe('Logger', () => {
                 annotations: [],
             } as unknown as TestInfo;
 
-            loggerInstance.setTestInfo(mockTestInfo as TestInfo);
+            loggerInstance.setTestInfo(mockTestInfo);
             loggerInstance.warn('test warning');
 
             expect(mockTestInfo.annotations).toHaveLength(1);
@@ -81,7 +81,7 @@ describe('Logger', () => {
                 annotations: [],
             } as unknown as TestInfo;
 
-            loggerInstance.setTestInfo(mockTestInfo as TestInfo);
+            loggerInstance.setTestInfo(mockTestInfo);
             loggerInstance.clearTestInfo();
             loggerInstance.info('test info');
 

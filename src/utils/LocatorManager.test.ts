@@ -24,7 +24,7 @@ const getLocatorManager = async () => {
     // Clear module cache and get fresh instance
     vi.resetModules();
     // Ensure config validation passes
-    process.env.GEMINI_API_KEY = 'test-key';
+    process.env['GEMINI_API_KEY'] = 'test-key';
     const { LocatorManager } = await import('./LocatorManager.js');
     const mockedFs = await import('fs');
     return { LocatorManager, mockedFs };

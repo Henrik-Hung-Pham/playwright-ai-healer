@@ -192,7 +192,7 @@ let _config: AppConfig | undefined;
 export const config: AppConfig = new Proxy({} as AppConfig, {
     get(_target, key: string | symbol) {
         if (!_config) _config = buildConfig();
-        return Reflect.get(_config, key);
+        return Reflect.get(_config, key) as unknown;
     },
 });
 
