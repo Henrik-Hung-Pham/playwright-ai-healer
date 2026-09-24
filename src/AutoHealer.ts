@@ -167,6 +167,7 @@ export class AutoHealer {
                     }
 
                     await retryFn(result.selector);
+                    this.annotateHeal(selector, locatorKey, result);
 
                     // Update locator if we have a key
                     if (locatorKey) {
@@ -394,6 +395,7 @@ export class AutoHealer {
                 try {
                     await this.assertUniqueMatch(newSelector);
                     await this.runOperation(failure.op, newSelector);
+                    this.annotateHeal(failure.selector, failure.locatorKey, healResult.value);
                     results[failure.index] = {
                         selectorOrKey: failure.op.selectorOrKey,
                         success: true,
@@ -457,6 +459,35 @@ export class AutoHealer {
                 const _exhaustive: never = op.action;
                 throw new Error(`[AutoHealer:runOperation] Unsupported action: ${_exhaustive}`);
             }
+        }
+    }
+
+    /**
+     * Mark the running test as having passed through a heal.
+     *
+     * A healed interaction succeeds, so the test goes green and nothing in the
+     * Playwright report set it apart from a test whose selectors all worked. That
+     * difference matters: the healed step ran against a model-chosen element that
+     * no human has confirmed is the intended one. The aggregate
+     * `healing-report.json` counts heals but cannot say *which* green test relied
+     * on one. This annotation shows under the test in the HTML report, the JSON
+     * reporter, and any tooling that reads `testInfo.annotations`.
+     *
+     * @param originalSelector - The selector that failed.
+     * @param locatorKey - The store key it was resolved from, if any.
+     * @param result - The accepted heal.
+     * @private
+     */
+    private annotateHeal(originalSelector: string, locatorKey: string | null, result: HealingResult): void {
+        const target = locatorKey ? `'${locatorKey}' ` : '';
+        const description =
+            `${target}'${originalSelector}' → '${result.selector}' ` +
+            `(confidence ${result.confidence.toFixed(2)}, strategy ${result.strategy})`;
+        try {
+            test.info().annotations.push({ type: 'healed-selector', description });
+        } catch {
+            // Not running inside a Playwright test (direct API use); the heal is
+            // still logged and recorded as a HealingEvent.
         }
     }
 
