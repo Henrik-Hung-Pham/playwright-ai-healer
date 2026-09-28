@@ -58,7 +58,11 @@ vi.mock('../../src/utils/LocatorManager.js', () => ({
         getInstance: vi.fn(() => ({
             getLocator: vi.fn(),
             updateLocator: vi.fn().mockResolvedValue(undefined),
-            recordSelectorFailure: vi.fn(),
+            recordSelectorFailure: vi.fn().mockResolvedValue({
+                recorded: false,
+                failureCount: 0,
+                quarantined: false,
+            }),
             recordSelectorHealed: vi.fn(),
         })),
     },
@@ -125,7 +129,12 @@ describe('AutoHealer Core Logic', () => {
 
         // Setup LocatorManager mock
         mockUpdateLocator = vi.fn().mockResolvedValue(undefined);
-        mockRecordSelectorFailure = vi.fn().mockResolvedValue(undefined);
+        // Resolves to a SelectorFailureOutcome — AutoHealer reads `quarantined` from it.
+        mockRecordSelectorFailure = vi.fn().mockResolvedValue({
+            recorded: false,
+            failureCount: 0,
+            quarantined: false,
+        });
         mockRecordSelectorHealed = vi.fn().mockResolvedValue(undefined);
         vi.mocked(LocatorManager.getInstance).mockReturnValue({
             getLocator: vi.fn(),
@@ -189,8 +198,9 @@ describe('AutoHealer Core Logic', () => {
 
             // Expect updateLocator to be called
             expect(mockUpdateLocator).toHaveBeenCalledWith(key, healedSelector);
-            // Expect recordSelectorHealed to be called after a successful heal
-            expect(mockRecordSelectorHealed).toHaveBeenCalledWith(key);
+            // Expect recordSelectorHealed to be called after a successful heal, with
+            // the pre-heal selector as the rollback target.
+            expect(mockRecordSelectorHealed).toHaveBeenCalledWith(key, brokenSelector);
         });
 
         it('should record selector failure when a keyed selector fails', async () => {
@@ -307,7 +317,9 @@ describe('AutoHealer Core Logic', () => {
                 },
             ]);
             expect(mockUpdateLocator).toHaveBeenCalledWith('page.button', healedSelector);
-            expect(mockRecordSelectorHealed).toHaveBeenCalledWith('page.button');
+            // healAll records the pre-heal selector too, so a bad heal reached via
+            // the concurrent path is just as reversible as one via executeAction.
+            expect(mockRecordSelectorHealed).toHaveBeenCalledWith('page.button', '#broken-btn');
         });
 
         it('should return failure with error message when AI returns null (FAIL)', async () => {
