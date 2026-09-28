@@ -150,7 +150,13 @@ export class AutoHealer {
         } catch (error) {
             logger.warn(`[AutoHealer] 💥 ${actionName} failed on: ${selector}. Initiating healing protocol...`);
             if (locatorKey) {
-                await locatorManager.recordSelectorFailure(locatorKey);
+                const outcome = await locatorManager.recordSelectorFailure(locatorKey);
+                if (outcome.quarantined) {
+                    logger.warn(
+                        `[AutoHealer] 🔙 Healed selector for '${locatorKey}' was quarantined after repeated ` +
+                            `failures and rolled back to '${outcome.revertedTo}'. Re-healing from there.`
+                    );
+                }
             }
             const result = await this.heal(selector, error as Error);
             if (result) {
@@ -172,6 +178,11 @@ export class AutoHealer {
                     if (locatorKey) {
                         logger.info(`[AutoHealer] 💾 Updating locator key '${locatorKey}' with new value.`);
                         await locatorManager.updateLocator(locatorKey, result.selector);
+                        // `selector` is the pre-heal value, captured in the provenance record.
+                        // Recording it makes this heal reversible: if the new selector turns
+                        // out to point at the wrong element, `recordSelectorFailure` can
+                        // restore what it replaced, and `revertLocator` can walk it back
+                        // manually.
                         await locatorManager.recordSelectorHealed(locatorKey, this.buildProvenance(selector, result));
                     }
                 } catch (retryError) {
@@ -398,6 +409,8 @@ export class AutoHealer {
                     };
                     if (failure.locatorKey) {
                         await locatorManager.updateLocator(failure.locatorKey, newSelector);
+                        // `failure.selector` is the pre-heal value — the rollback target,
+                        // captured in the provenance record.
                         await locatorManager.recordSelectorHealed(
                             failure.locatorKey,
                             this.buildProvenance(failure.selector, healResult.value)

@@ -57,22 +57,22 @@ Test → BasePage.safeClick/safeFill
 
 ### Key Files
 
-| File                               | Role                                                                                                                                               |
-| ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/AutoHealer.ts`                | Public healing API (`click`, `fill`, `hover`…) + `heal()` orchestration; records `HealingEvent[]`                                                  |
-| `src/ai/AIClientManager.ts`        | Owns AI client lifecycle (OpenAI/Gemini), API key rotation, provider failover, and raw `makeRequest()` with timeout                                |
-| `src/ai/DOMSerializer.ts`          | `getSimplifiedDOM(page, maxChars)` — focused snapshot of interactive elements for the AI prompt, budget-capped per node                            |
-| `src/ai/ResponseParser.ts`         | `parseAIResponse()` — strips markdown fences, backticks, and quotes from raw AI output                                                             |
-| `src/config/index.ts`              | Centralized config validated with Zod; exports `config` object; loads `.env.{TEST_ENV}` via `Environment.ts`                                       |
-| `src/config/locators.json`         | Persistent selector store; updated at runtime by `LocatorManager` when healing succeeds                                                            |
-| `src/utils/LocatorManager.ts`      | Singleton facade over a pluggable `LocatorAdapter`; dot-path key access (e.g., `booksToScrape.bookTitle`); delegates all I/O to the active adapter |
-| `src/utils/SiteHandler.ts`         | Strategy pattern for site-specific overlay dismissal; `BooksToScrapeHandler` and `NoOpHandler`                                                     |
-| `src/pages/BasePage.ts`            | Abstract base for all page objects; wraps interactions with overlay dismissal, `AutoHealer` delegation, and Vercel security challenge detection    |
-| `src/pages/BooksHomePage.ts`       | Home page entry point; `navigateToCategory()`, `clickBook()`, `getBookCount()`, pagination support                                                 |
-| `src/pages/BookDetailPage.ts`      | Book detail page; `getTitle()`, `getPrice()`, `getBreadcrumbs()`                                                                                   |
-| `src/utils/HealingMetrics.ts`      | Aggregates `HealingEvent`s; `buildReport()` is static so the reporter can merge events from worker processes                                       |
-| `src/reporters/HealingReporter.ts` | Playwright reporter; merges per-worker healing shards into `test-results/healing-report.json`                                                      |
-| `tests/fixtures/base.ts`           | Playwright fixtures providing `autoHealer` and `booksPage`, plus the worker-scoped `healingMetricsShard` flush                                     |
+| File                               | Role                                                                                                                                                                                                                                                                                                     |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/AutoHealer.ts`                | Public healing API (`click`, `fill`, `hover`…) + `heal()` orchestration; records `HealingEvent[]`                                                                                                                                                                                                        |
+| `src/ai/AIClientManager.ts`        | Owns AI client lifecycle (OpenAI/Gemini), API key rotation, provider failover, and raw `makeRequest()` with timeout                                                                                                                                                                                      |
+| `src/ai/DOMSerializer.ts`          | `getSimplifiedDOM(page, maxChars)` — focused snapshot of interactive elements for the AI prompt, budget-capped per node                                                                                                                                                                                  |
+| `src/ai/ResponseParser.ts`         | `parseAIResponse()` — strips markdown fences, backticks, and quotes from raw AI output                                                                                                                                                                                                                   |
+| `src/config/index.ts`              | Centralized config validated with Zod; exports `config` object; loads `.env.{TEST_ENV}` via `Environment.ts`                                                                                                                                                                                             |
+| `src/config/locators.json`         | Persistent selector store; updated at runtime by `LocatorManager` when healing succeeds                                                                                                                                                                                                                  |
+| `src/utils/LocatorManager.ts`      | Singleton facade over a pluggable `LocatorAdapter`; dot-path key access (e.g., `booksToScrape.bookTitle`); delegates all I/O to the active adapter; owns selector stability metrics and rolls a healed selector back to the value it replaced after `SELECTOR_QUARANTINE_THRESHOLD` consecutive failures |
+| `src/utils/SiteHandler.ts`         | Strategy pattern for site-specific overlay dismissal; `BooksToScrapeHandler` and `NoOpHandler`                                                                                                                                                                                                           |
+| `src/pages/BasePage.ts`            | Abstract base for all page objects; wraps interactions with overlay dismissal, `AutoHealer` delegation, and Vercel security challenge detection                                                                                                                                                          |
+| `src/pages/BooksHomePage.ts`       | Home page entry point; `navigateToCategory()`, `clickBook()`, `getBookCount()`, pagination support                                                                                                                                                                                                       |
+| `src/pages/BookDetailPage.ts`      | Book detail page; `getTitle()`, `getPrice()`, `getBreadcrumbs()`                                                                                                                                                                                                                                         |
+| `src/utils/HealingMetrics.ts`      | Aggregates `HealingEvent`s; `buildReport()` is static so the reporter can merge events from worker processes                                                                                                                                                                                             |
+| `src/reporters/HealingReporter.ts` | Playwright reporter; merges per-worker healing shards into `test-results/healing-report.json`                                                                                                                                                                                                            |
+| `tests/fixtures/base.ts`           | Playwright fixtures providing `autoHealer` and `booksPage`, plus the worker-scoped `healingMetricsShard` flush                                                                                                                                                                                           |
 
 ### Environment Configuration
 
@@ -85,12 +85,12 @@ Environment is selected by `TEST_ENV` variable (`dev`/`staging`/`prod`). The con
 - `GEMINI_API_KEY` — required if provider is `gemini`
 - `GEMINI_MODEL` — Gemini/Gemma model name (default: `gemma-4-31b-it`)
 - `OPENAI_API_KEY` / `OPENAI_API_KEYS` (comma-separated for rotation) — required if provider is `openai`
-- `HEALING_AUTO_REVERT_AFTER` (default: `3`, `0` disables) — number of post-heal failures after
-  which `LocatorManager` restores the selector the heal replaced. Every persisted heal records a
-  `HealProvenance` entry (previous selector, model, provider, confidence, strategy) in
-  `metrics.json`, which is what makes `revertLocator()` possible — before that, `updateLocator` was
-  a destructive overwrite with no way back.
 - `BASE_URL`, `LOG_LEVEL`, `HEADLESS`, `TEST_TIMEOUT`
+- `SELECTOR_QUARANTINE_THRESHOLD` — consecutive post-heal failures before a healed selector is
+  automatically rolled back to the value it replaced (default `3`, minimum `1`). Every persisted
+  heal also records a `HealProvenance` entry (previous selector, model, provider, confidence,
+  strategy) in `metrics.json`, which `LocatorManager.revertLocator()` can walk back through
+  manually, one heal at a time, independent of the automatic threshold above.
 
 ### TypeScript Conventions
 

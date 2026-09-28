@@ -160,17 +160,19 @@ describe('LocatorManager — heal provenance', () => {
         });
     });
 
-    describe('auto-revert', () => {
+    describe('auto-revert (via the SELECTOR_QUARANTINE_THRESHOLD quarantine path)', () => {
         /**
-         * `failureCount` only increments for keys that were previously healed, so
-         * it is already a targeted measure of "the replacement we accepted does
-         * not work". Before this it was collected and never read.
+         * `recordSelectorHealed` sets `previousSelector` from the provenance
+         * record, which is exactly the rollback target the existing automatic
+         * quarantine in `recordSelectorFailure` already consumes — so a heal
+         * recorded with provenance is quarantined the same way a heal recorded
+         * with a bare selector always was.
          */
         it('reverts once a healed selector has failed the configured number of times', async () => {
             await manager.updateLocator('app.loginButton', '#wrong-btn');
             await manager.recordSelectorHealed('app.loginButton', provenanceOf('#login-btn', '#wrong-btn'));
 
-            // Default HEALING_AUTO_REVERT_AFTER is 3.
+            // Default SELECTOR_QUARANTINE_THRESHOLD is 3.
             await manager.recordSelectorFailure('app.loginButton');
             expect(manager.getLocator('app.loginButton')).toBe('#wrong-btn');
 

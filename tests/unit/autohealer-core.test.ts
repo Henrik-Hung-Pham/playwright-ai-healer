@@ -58,7 +58,11 @@ vi.mock('../../src/utils/LocatorManager.js', () => ({
         getInstance: vi.fn(() => ({
             getLocator: vi.fn(),
             updateLocator: vi.fn().mockResolvedValue(undefined),
-            recordSelectorFailure: vi.fn(),
+            recordSelectorFailure: vi.fn().mockResolvedValue({
+                recorded: false,
+                failureCount: 0,
+                quarantined: false,
+            }),
             recordSelectorHealed: vi.fn(),
         })),
     },
@@ -125,7 +129,12 @@ describe('AutoHealer Core Logic', () => {
 
         // Setup LocatorManager mock
         mockUpdateLocator = vi.fn().mockResolvedValue(undefined);
-        mockRecordSelectorFailure = vi.fn().mockResolvedValue(undefined);
+        // Resolves to a SelectorFailureOutcome — AutoHealer reads `quarantined` from it.
+        mockRecordSelectorFailure = vi.fn().mockResolvedValue({
+            recorded: false,
+            failureCount: 0,
+            quarantined: false,
+        });
         mockRecordSelectorHealed = vi.fn().mockResolvedValue(undefined);
         vi.mocked(LocatorManager.getInstance).mockReturnValue({
             getLocator: vi.fn(),
@@ -311,6 +320,8 @@ describe('AutoHealer Core Logic', () => {
                 },
             ]);
             expect(mockUpdateLocator).toHaveBeenCalledWith('page.button', healedSelector);
+            // healAll records the pre-heal selector too, so a bad heal reached via
+            // the concurrent path is just as reversible as one via executeAction.
             expect(mockRecordSelectorHealed).toHaveBeenCalledWith(
                 'page.button',
                 expect.objectContaining({ healedSelector, previousSelector: '#broken-btn' })

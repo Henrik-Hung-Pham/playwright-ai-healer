@@ -5,7 +5,13 @@ import * as lockfile from 'proper-lockfile';
 import { logger } from './Logger.js';
 import { createLocatorAdapter, type LocatorAdapter } from './LocatorAdapter.js';
 import { config } from '../config/index.js';
-import { MAX_PROVENANCE_ENTRIES, type HealProvenance, type MetricsStore, type SelectorMetrics } from '../types.js';
+import {
+    MAX_PROVENANCE_ENTRIES,
+    type HealProvenance,
+    type MetricsStore,
+    type SelectorFailureOutcome,
+    type SelectorMetrics,
+} from '../types.js';
 
 // Get current directory name in ESM
 const __filename = fileURLToPath(import.meta.url);
@@ -32,6 +38,12 @@ export class LocatorManager {
     private readonly adapter: LocatorAdapter;
     private readonly metricsPath: string;
     private metrics: MetricsStore = {};
+    /**
+     * Rollback staged by the metrics mutation, applied to the locator store once the
+     * metrics lock is released. Kept off the mutation path so the locator write never
+     * happens while the metrics lockfile is held.
+     */
+    private pendingRevert: { key: string; selector: string } | undefined;
 
     private constructor() {
         this.adapter = createLocatorAdapter(config.locatorStore);
@@ -162,45 +174,103 @@ export class LocatorManager {
     }
 
     /**
-     * Record a post-healing failure for a previously healed selector.
+     * Record a post-healing failure, rolling the selector back once a healed
+     * value has failed `config.ai.healing.quarantineThreshold` times in a row.
      *
      * Only fires if the selector has a prior `healedAt` timestamp — i.e. it
      * was successfully healed at least once. This prevents inflating counts
      * for original (never-healed) selectors that happen to fail.
      *
+     * **Why the rollback exists.** A healed selector is accepted when it parses,
+     * validates, and resolves to exactly one element — none of which establishes
+     * that it resolves to the *intended* element. A confidently wrong heal was
+     * previously persisted to the locator store permanently and reused by every
+     * later run; `failureCount` counted the consequences without ever acting on
+     * them. Crossing the threshold now restores the selector the heal replaced and
+     * records the rejected value, so a bad repair decays instead of compounding.
+     *
+     * After a rollback, `healedAt` is cleared: the heal is no longer in effect, so
+     * failures of the restored selector must not accrue toward another quarantine.
+     * The key stays fully healable — the next failure triggers a fresh heal — which
+     * is deliberate. Permanently disabling healing for a key would trade a wrong
+     * selector for a dead one.
+     *
      * @param key - Dot-path locator key (e.g. `'booksToScrape.bookTitle'`)
+     * @returns What was done, so callers can report a rollback rather than let it pass silently.
      */
-    public async recordSelectorFailure(key: string): Promise<void> {
-        // The guard is evaluated under the file lock (after re-reading metrics) so that
-        // parallel Playwright workers see the latest healedAt value written by other workers.
+    public async recordSelectorFailure(key: string): Promise<SelectorFailureOutcome> {
+        const threshold = config.ai.healing.quarantineThreshold;
+        const outcome: SelectorFailureOutcome = { recorded: false, failureCount: 0, quarantined: false };
+
+        // Everything below runs under the metrics file lock, after re-reading from
+        // disk, so parallel Playwright workers agree on the failure count that
+        // triggers a rollback rather than each counting in isolation.
         const didUpdate = await this.atomicMetricUpdate(key, existing => {
             if (!existing.healedAt) return null; // not yet healed — skip (signals no write)
-            return {
-                ...existing,
-                failureCount: existing.failureCount + 1,
-                lastFailedAt: new Date().toISOString(),
+
+            const failureCount = existing.failureCount + 1;
+            const now = new Date().toISOString();
+            outcome.failureCount = failureCount;
+
+            // A key with no recorded `previousSelector` (healed before this field
+            // existed, or healed without one supplied) has no rollback target, so it
+            // keeps accumulating failures rather than reverting to nothing.
+            const revertTarget = existing.previousSelector;
+            if (failureCount < threshold || revertTarget === undefined) {
+                return { ...existing, failureCount, lastFailedAt: now };
+            }
+
+            // Read the healed value being rejected before overwriting it.
+            const rejected = this.adapter.getLocator(key);
+            this.pendingRevert = { key, selector: revertTarget };
+
+            outcome.quarantined = true;
+            outcome.revertedTo = revertTarget;
+            if (rejected !== null) outcome.quarantinedSelector = rejected;
+
+            const next: SelectorMetrics = {
+                failureCount: 0, // the rolled-back selector starts a fresh cycle
+                lastFailedAt: now,
+                quarantinedAt: now,
+                quarantineCount: (existing.quarantineCount ?? 0) + 1,
+                // healedAt and previousSelector are intentionally dropped: no heal is
+                // in effect any more, and the revert target has been consumed.
             };
+            if (rejected !== null) next.quarantinedSelector = rejected;
+            return next;
         });
-        if (!didUpdate) return;
 
-        const failureCount = this.metrics[key]?.failureCount ?? 0;
-        logger.warn(`[LocatorManager] ⚠️ Healed selector '${key}' failed again (total failures: ${failureCount})`);
+        outcome.recorded = didUpdate;
+        if (!didUpdate) return outcome;
 
-        // Act on the counter instead of only accumulating it.
-        //
-        // `failureCount` is incremented only for keys that were previously healed
-        // (see the `healedAt` guard above), so it is already a targeted measure of
-        // "the replacement we accepted does not work". Repeated failures are the
-        // clearest evidence available that a heal was wrong, and until now nothing
-        // consumed that evidence — the metric was collected and never read.
-        const threshold = config.ai.healing.autoRevertAfter;
-        if (threshold > 0 && failureCount >= threshold) {
+        // Perform the locator-store write outside the metrics mutation so a failure
+        // here cannot leave the lock held. Ordering is deliberate: metrics record the
+        // quarantine first, so a crash between the two leaves a key marked
+        // quarantined with the healed selector still in place — visible and
+        // re-correctable — rather than a silently reverted selector with no record.
+        if (this.pendingRevert) {
+            const { selector } = this.pendingRevert;
+            this.pendingRevert = undefined;
+            try {
+                await this.adapter.updateLocator(key, selector);
+                logger.warn(
+                    `[LocatorManager] 🔙 Quarantined healed selector for '${key}' after ${threshold} ` +
+                        `consecutive failures. Rolled back to '${selector}' ` +
+                        `(rejected: '${outcome.quarantinedSelector ?? 'unknown'}').`
+                );
+            } catch (error) {
+                logger.error(`[LocatorManager] ❌ Failed to roll back '${key}' to '${selector}': ${String(error)}`);
+                outcome.quarantined = false;
+                delete outcome.revertedTo;
+            }
+        } else {
             logger.warn(
-                `[LocatorManager] ↩️ '${key}' has failed ${failureCount} times since it was healed ` +
-                    `(HEALING_AUTO_REVERT_AFTER=${threshold}). Reverting to the last known-good selector.`
+                `[LocatorManager] ⚠️ Healed selector '${key}' failed again ` +
+                    `(${outcome.failureCount}/${threshold} before rollback)`
             );
-            await this.revertLocator(key);
         }
+
+        return outcome;
     }
 
     /**
@@ -212,19 +282,28 @@ export class LocatorManager {
      * @param key - Dot-path locator key (e.g. `'booksToScrape.bookTitle'`)
      * @param provenance - What was replaced and on whose authority. Optional so
      *   existing callers keep working, but omitting it means the heal cannot
-     *   later be reviewed or reverted — `revertLocator` has nothing to restore.
+     *   later be reviewed, automatically rolled back by {@link recordSelectorFailure},
+     *   or manually undone by {@link revertLocator} — nothing records the value
+     *   it replaced.
      */
     public async recordSelectorHealed(key: string, provenance?: HealProvenance): Promise<void> {
         await this.atomicMetricUpdate(key, existing => {
             const history = provenance
                 ? [...(existing.history ?? []), provenance].slice(-MAX_PROVENANCE_ENTRIES)
                 : existing.history;
-            return {
+            const next: SelectorMetrics = {
                 ...existing,
                 failureCount: 0, // reset: count failures per heal cycle, not lifetime
                 healedAt: new Date().toISOString(),
                 ...(history ? { history } : {}),
             };
+            if (provenance !== undefined) {
+                // The single-slot rollback target `recordSelectorFailure` consumes on
+                // automatic quarantine; `history` below is the fuller, independent
+                // audit trail `revertLocator` walks back through manually.
+                next.previousSelector = provenance.previousSelector;
+            }
+            return next;
         });
     }
 
@@ -244,7 +323,11 @@ export class LocatorManager {
      * This is the counterpart the store never had. A heal overwrites a
      * human-authored selector in place; without a way back, a wrong heal is
      * permanent and the original intent is lost — the reviewer cannot even see
-     * what the selector used to be.
+     * what the selector used to be. Manual and independent of the automatic
+     * quarantine rollback in {@link recordSelectorFailure}: that one fires on
+     * `SELECTOR_QUARANTINE_THRESHOLD` consecutive failures and only ever
+     * restores the single most recent heal; this one can be called on demand
+     * and walks back through successive heals one at a time.
      *
      * The reverted entry is popped from the history, so repeated calls walk back
      * through successive heals rather than restoring the same value forever.
@@ -261,11 +344,20 @@ export class LocatorManager {
         }
 
         await this.updateLocator(key, last.previousSelector);
-        await this.atomicMetricUpdate(key, existing => ({
-            ...existing,
-            failureCount: 0,
-            history: (existing.history ?? []).slice(0, -1),
-        }));
+        await this.atomicMetricUpdate(key, existing => {
+            const next: SelectorMetrics = {
+                failureCount: 0,
+                history: (existing.history ?? []).slice(0, -1),
+                // healedAt and previousSelector are intentionally omitted, mirroring
+                // the automatic quarantine rollback: no heal is in effect any more,
+                // so failures of the restored selector must not be attributed to it.
+            };
+            if (existing.lastFailedAt !== undefined) next.lastFailedAt = existing.lastFailedAt;
+            if (existing.quarantinedSelector !== undefined) next.quarantinedSelector = existing.quarantinedSelector;
+            if (existing.quarantinedAt !== undefined) next.quarantinedAt = existing.quarantinedAt;
+            if (existing.quarantineCount !== undefined) next.quarantineCount = existing.quarantineCount;
+            return next;
+        });
 
         logger.warn(
             `[LocatorManager] ↩️ Reverted '${key}' to '${last.previousSelector}' ` +
