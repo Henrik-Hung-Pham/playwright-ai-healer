@@ -55,6 +55,10 @@ const envSchema = z.object({
     // Defaults to 'apply' so existing setups are unchanged. See the HealingMode
     // docs in types.ts for why 'suggest' is the safer choice in CI.
     HEALING_MODE: z.enum(['off', 'suggest', 'apply']).default('apply'),
+    // Consecutive post-heal failures tolerated before a healed selector is rolled
+    // back to the value it replaced. 1 would revert on the first flake; the default
+    // of 3 requires a consistent pattern before discarding a heal.
+    SELECTOR_QUARANTINE_THRESHOLD: z.string().default('3').transform(Number).pipe(z.number().int().min(1)),
 });
 
 type AppConfig = {
@@ -74,6 +78,7 @@ type AppConfig = {
             confidenceThreshold: number;
             domSnapshotCharLimit: number;
             failureMode: 'fail' | 'skip';
+            quarantineThreshold: number;
         };
         security: { vercelChallengePath: string };
         prompts: { healingPrompt: (selector: string, error: string, html: string) => string };
@@ -154,6 +159,7 @@ function buildConfig(): AppConfig {
                 confidenceThreshold: 0.7,
                 domSnapshotCharLimit: env.DOM_SNAPSHOT_CHAR_LIMIT,
                 failureMode: env.HEALING_FAILURE_MODE,
+                quarantineThreshold: env.SELECTOR_QUARANTINE_THRESHOLD,
             },
             security: {
                 vercelChallengePath: '.well-known/vercel/security/request-challenge',

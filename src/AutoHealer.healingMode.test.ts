@@ -23,7 +23,7 @@ const { mockLocatorManager } = vi.hoisted(() => ({
     mockLocatorManager: {
         getLocator: vi.fn((key: string) => (key === 'app.btn' ? '#old-selector' : null)),
         updateLocator: vi.fn().mockResolvedValue(undefined),
-        recordSelectorFailure: vi.fn(),
+        recordSelectorFailure: vi.fn().mockResolvedValue({ recorded: true, failureCount: 1, quarantined: false }),
         recordSelectorHealed: vi.fn(),
     },
 }));
