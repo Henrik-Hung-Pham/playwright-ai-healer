@@ -240,6 +240,38 @@ export interface SelectorMetrics {
      * structurally here to keep `types.ts` free of a module-level import cycle.
      */
     fingerprint?: import('./ai/ElementFingerprint.js').ElementFingerprint;
+    /**
+     * The selector that was in the store immediately before the most recent heal.
+     *
+     * This is the revert target: without it a healed selector that turns out to be
+     * wrong is permanent, because the value it replaced is gone.
+     */
+    previousSelector?: string;
+    /** The healed selector that was rolled back after repeated failures. */
+    quarantinedSelector?: string;
+    /** ISO 8601 timestamp of the most recent quarantine. */
+    quarantinedAt?: string;
+    /** How many times a healed selector for this key has been quarantined. */
+    quarantineCount?: number;
+}
+
+/**
+ * What `LocatorManager.recordSelectorFailure()` did in response to a failure.
+ *
+ * Returned rather than only logged so callers can surface a rollback in their own
+ * reporting — a silent revert would be as opaque as the silent non-revert it replaces.
+ */
+export interface SelectorFailureOutcome {
+    /** Whether a metrics update was written (false when the key was never healed). */
+    recorded: boolean;
+    /** Post-increment consecutive failure count since the last heal. */
+    failureCount: number;
+    /** Whether this failure crossed the threshold and triggered a rollback. */
+    quarantined: boolean;
+    /** The selector restored into the locator store, when a rollback occurred. */
+    revertedTo?: string;
+    /** The healed selector that was rolled back, when a rollback occurred. */
+    quarantinedSelector?: string;
 }
 
 /**
