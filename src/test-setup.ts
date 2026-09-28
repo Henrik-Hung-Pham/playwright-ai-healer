@@ -28,6 +28,7 @@ vi.mock('./config/index.js', () => ({
                 confidenceThreshold: 0.7,
                 domSnapshotCharLimit: 2000,
                 failureMode: 'fail' as 'fail' | 'skip',
+                quarantineThreshold: 3,
             },
             security: { vercelChallengePath: '.well-known/vercel/security/request-challenge' },
             prompts: {

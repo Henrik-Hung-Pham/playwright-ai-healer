@@ -65,16 +65,35 @@ export async function getSimplifiedDOM(
             'action',
         ]);
 
+        // Input types whose `value` attribute is a visible button label, not user data.
+        const BUTTON_INPUT_TYPES = new Set(['submit', 'button', 'reset']);
+
         // Only id and name for ancestor (structural) elements
         const STRUCTURAL_ATTRS = new Set(['id', 'name', 'role']);
 
-        // Selectors for interactive elements
+        // Selectors for interactive elements.
+        //
+        // Links (`a[href]`) were missing from this list, so on any page that had
+        // at least one form control — i.e. almost every page — no link ever
+        // reached the model. That made the most common click target in web
+        // testing unhealable: the model was asked to repair `article h3 a` from a
+        // snapshot that contained no anchors at all. `href` was already in
+        // FULL_ATTRS, which shows links were always meant to be here.
         const INTERACTIVE_SELECTOR = [
+            'a[href]',
             'input',
             'button',
             'select',
             'textarea',
             'form',
+            'summary',
+            '[contenteditable="true"]',
+            '[contenteditable=""]',
+            '[role="link"]',
+            '[role="tab"]',
+            '[role="menuitem"]',
+            '[role="option"]',
+            '[role="switch"]',
             '[role="button"]',
             '[role="textbox"]',
             '[role="searchbox"]',
@@ -117,10 +136,19 @@ export async function getSimplifiedDOM(
             let attrs = '';
             Array.from(el.attributes).forEach(attr => {
                 const isDataTest = attr.name.startsWith('data-test') || attr.name.startsWith('data-cy');
-                if (allowedAttrs.has(attr.name) || (isInteractive && isDataTest)) {
+                // A submit/button/reset input has no text content — its `value` IS
+                // its visible label ("Search", "Log in"), so without it the model
+                // sees an anonymous `<input type="submit">`. Every other input's
+                // value may be user data and stays out of the snapshot.
+                const isButtonLabel =
+                    isInteractive &&
+                    attr.name === 'value' &&
+                    tagName === 'input' &&
+                    BUTTON_INPUT_TYPES.has((el.getAttribute('type') ?? '').toLowerCase());
+                if (allowedAttrs.has(attr.name) || (isInteractive && isDataTest) || isButtonLabel) {
                     let value = attr.value;
-                    if (attr.name === 'value' && (tagName === 'input' || tagName === 'textarea')) {
-                        value = '[REDACTED]';
+                    if (isButtonLabel) {
+                        value = scrubPII(value);
                     }
                     if (attr.name === 'class' && value.length > 60) {
                         value = value.substring(0, 60) + '...';
