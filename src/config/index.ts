@@ -58,6 +58,10 @@ const envSchema = z.object({
         .transform(val => val !== 'false'),
     LOCATOR_STORE: z.enum(['file', 'sqlite']).default('file'),
     HEALING_FAILURE_MODE: z.enum(['fail', 'skip']).default('fail'),
+    // Consecutive post-heal failures tolerated before a healed selector is rolled
+    // back to the value it replaced. 1 would revert on the first flake; the default
+    // of 3 requires a consistent pattern before discarding a heal.
+    SELECTOR_QUARANTINE_THRESHOLD: z.string().default('3').transform(Number).pipe(z.number().int().min(1)),
 });
 
 export type AppConfig = {
@@ -76,6 +80,7 @@ export type AppConfig = {
             confidenceThreshold: number;
             domSnapshotCharLimit: number;
             failureMode: 'fail' | 'skip';
+            quarantineThreshold: number;
         };
         security: { vercelChallengePath: string };
         prompts: { healingPrompt: (selector: string, error: string, html: string) => string };
@@ -142,6 +147,7 @@ function buildConfig(): AppConfig {
                 confidenceThreshold: 0.7,
                 domSnapshotCharLimit: env.DOM_SNAPSHOT_CHAR_LIMIT,
                 failureMode: env.HEALING_FAILURE_MODE,
+                quarantineThreshold: env.SELECTOR_QUARANTINE_THRESHOLD,
             },
             security: {
                 vercelChallengePath: '.well-known/vercel/security/request-challenge',
