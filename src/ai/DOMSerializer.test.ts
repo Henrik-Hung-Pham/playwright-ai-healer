@@ -64,6 +64,59 @@ describe('getSimplifiedDOM', () => {
         expect(dom).not.toContain('hunter2');
     });
 
+    it('includes links even when the page also has form controls', async () => {
+        // Regression: `a[href]` was not in the interactive set, so any page with a
+        // single button or input produced a snapshot with no anchors at all.
+        const page = pageFromHtml(`
+            <article class="product_pod">
+                <h3><a href="catalogue/book_1/index.html" title="A Light in the Attic">A Light in the ...</a></h3>
+                <button class="btn btn-primary">Add to basket</button>
+            </article>
+        `);
+
+        const dom = await getSimplifiedDOM(page);
+
+        expect(dom).toContain('<a href="catalogue/book_1/index.html" title="A Light in the Attic">');
+        expect(dom).toContain('A Light in the ...');
+        // The link's ancestors are kept so the model can see where it sits.
+        expect(dom).toContain('<h3>');
+    });
+
+    it('ignores anchors without an href', async () => {
+        const page = pageFromHtml('<button id="b">Go</button><a name="top">Top anchor</a>');
+
+        const dom = await getSimplifiedDOM(page);
+
+        expect(dom).not.toContain('Top anchor');
+    });
+
+    it('includes ARIA widgets and disclosure summaries', async () => {
+        const page = pageFromHtml(`
+            <button id="b">Go</button>
+            <div role="tab" id="tab-reviews">Reviews</div>
+            <li role="menuitem" id="mi-logout">Log out</li>
+            <details><summary id="more">More info</summary></details>
+        `);
+
+        const dom = await getSimplifiedDOM(page);
+
+        expect(dom).toContain('id="tab-reviews"');
+        expect(dom).toContain('id="mi-logout"');
+        expect(dom).toContain('id="more"');
+    });
+
+    it('shows the label of submit inputs but not the value of text inputs', async () => {
+        const page = pageFromHtml(`
+            <input type="submit" id="go" value="Search" />
+            <input type="text" id="q" value="hunter2" />
+        `);
+
+        const dom = await getSimplifiedDOM(page);
+
+        expect(dom).toContain('value="Search"');
+        expect(dom).not.toContain('hunter2');
+    });
+
     it('scrubs PII (email and phone) from interactive text', async () => {
         const page = pageFromHtml('<button id="contact">Email me at jane.doe@example.com or 555-123-4567</button>');
 
