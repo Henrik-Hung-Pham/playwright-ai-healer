@@ -6,6 +6,7 @@ import { logger } from './Logger.js';
 import { createLocatorAdapter, type LocatorAdapter } from './LocatorAdapter.js';
 import { config } from '../config/index.js';
 import type { MetricsStore, SelectorFailureOutcome, SelectorMetrics } from '../types.js';
+import type { ElementFingerprint } from '../ai/ElementFingerprint.js';
 
 // Get current directory name in ESM
 const __filename = fileURLToPath(import.meta.url);
@@ -291,6 +292,31 @@ export class LocatorManager {
             }
             return next;
         });
+    }
+
+    /**
+     * Store the last-known-good element snapshot for a key.
+     *
+     * Overwrites any previous fingerprint: only the most recent successful
+     * observation is useful, since an older one may describe a page state that
+     * no longer exists.
+     *
+     * @param key - Dot-path locator key.
+     * @param fingerprint - Snapshot captured on a successful interaction.
+     */
+    public async recordFingerprint(key: string, fingerprint: ElementFingerprint): Promise<void> {
+        await this.atomicMetricUpdate(key, existing => ({ ...existing, fingerprint }));
+    }
+
+    /**
+     * Return the last-known-good element snapshot for a key.
+     *
+     * @param key - Dot-path locator key.
+     * @returns The stored fingerprint, or `null` when the key has never been
+     *   observed working.
+     */
+    public getFingerprint(key: string): ElementFingerprint | null {
+        return this.metrics[key]?.fingerprint ?? null;
     }
 
     /**
