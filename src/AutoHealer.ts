@@ -4,6 +4,7 @@ import { LocatorManager } from './utils/LocatorManager.js';
 import { logger } from './utils/Logger.js';
 import { AIClientManager } from './ai/AIClientManager.js';
 import { HealingEngine } from './ai/HealingEngine.js';
+import { captureFingerprint } from './ai/ElementFingerprint.js';
 import type {
     AIProvider,
     ClickOptions,
@@ -147,6 +148,10 @@ export class AutoHealer {
                 );
             }
             await actionFn(selector);
+            // The interaction succeeded, so this selector is — right now — known
+            // to point at the right element. That is the only moment the
+            // framework can record what "right" looks like.
+            await this.rememberElement(locatorKey, selector);
         } catch (error) {
             logger.warn(`[AutoHealer] 💥 ${actionName} failed on: ${selector}. Initiating healing protocol...`);
             if (locatorKey) {
@@ -524,6 +529,51 @@ export class AutoHealer {
             confidence: result.confidence,
             strategy: result.strategy,
         };
+    }
+
+    /**
+     * Record what the element looked like while the selector still worked.
+     *
+     * Only runs for keyed selectors — an inline selector string has nowhere to
+     * store a fingerprint against.
+     *
+     * **Cost control.** Capturing on every successful interaction would add a
+     * `page.evaluate` to the hot path of every click and fill in the suite. It is
+     * instead skipped whenever a fingerprint is already stored for the *same*
+     * selector, so the cost is one evaluation per key per selector version — a
+     * handful per run rather than one per action. A changed selector (a heal
+     * landed, or someone edited the store) invalidates the record and triggers a
+     * fresh capture, which is exactly when the old one stopped describing
+     * reality.
+     *
+     * Never throws. A fingerprint is best-effort telemetry; failing to record one
+     * must not turn a passing interaction into a failing test.
+     *
+     * @param locatorKey - Dot-path key, or `null` for an inline selector.
+     * @param selector - The selector that just succeeded.
+     * @private
+     */
+    private async rememberElement(locatorKey: string | null, selector: string): Promise<void> {
+        if (!locatorKey) return;
+
+        try {
+            const locatorManager = LocatorManager.getInstance();
+            const existing = locatorManager.getFingerprint(locatorKey);
+            if (existing && existing.selector === selector) return;
+
+            const fingerprint = await captureFingerprint(this.page, selector);
+            if (!fingerprint) return;
+
+            await locatorManager.recordFingerprint(locatorKey, fingerprint);
+            if (this.debug) {
+                logger.debug(
+                    `[AutoHealer] 🧬 Recorded element fingerprint for '${locatorKey}' ` +
+                        `(tag=${fingerprint.tag}, name="${fingerprint.accessibleName ?? ''}").`
+                );
+            }
+        } catch (error) {
+            logger.debug(`[AutoHealer] Could not record fingerprint for '${locatorKey}': ${String(error)}`);
+        }
     }
 
     /**
