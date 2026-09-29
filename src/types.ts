@@ -231,6 +231,18 @@ export interface SelectorMetrics {
     /** ISO 8601 timestamp of the most recent healing event. */
     healedAt?: string;
     /**
+     * Snapshot of the element this key resolved to the last time it worked.
+     *
+     * Recorded on a *successful* interaction — the one moment the framework
+     * knows the selector is pointing at the right thing. Healing had no such
+     * record before, so a repair could only be judged on whether the replacement
+     * resolved uniquely, never on whether it resolved to the same element.
+     *
+     * Typed as `ElementFingerprint` in `src/ai/ElementFingerprint.ts`; declared
+     * structurally here to keep `types.ts` free of a module-level import cycle.
+     */
+    fingerprint?: import('./ai/ElementFingerprint.js').ElementFingerprint;
+    /**
      * The selector that was in the store immediately before the most recent heal.
      *
      * This is the revert target: without it a healed selector that turns out to be
