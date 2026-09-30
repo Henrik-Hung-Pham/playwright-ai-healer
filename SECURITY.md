@@ -218,19 +218,112 @@ test('my test', async ({ page }) => {
 
 ## Data Privacy
 
-### DOM Snapshots
+> **The single most important fact about this framework:** when a selector fails,
+> a snapshot of the page under test is transmitted to a third-party LLM provider.
+> If you test an authenticated application against real data, that data leaves
+> your infrastructure. Read this section before enabling healing anywhere near
+> production.
 
-- DOM snapshots sent to AI are simplified
-- Personal data may be included - be cautious
-- Use test data, not production data
-- Consider data retention policies of AI providers
+### The egress path
 
-### Recommendations
+Healing is the only feature that sends data off-box. Nothing is transmitted on
+the happy path.
 
-- Use anonymized test data
-- Avoid testing with real user data
-- Review AI provider privacy policies
-- Implement data masking if needed
+|                 |                                                                                                                                        |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| **Trigger**     | A Playwright interaction fails and `AutoHealer` attempts a repair. Never on success.                                                   |
+| **Payload**     | A simplified DOM snapshot (`DOMSerializer.getSimplifiedDOM`), the failed selector, and the Playwright error message.                   |
+| **Destination** | `generativelanguage.googleapis.com` (Gemini) or `api.openai.com` (OpenAI), per `AI_PROVIDER`.                                          |
+| **Volume**      | Capped by `DOM_SNAPSHOT_CHAR_LIMIT` — **default 12 000 characters** per heal attempt.                                                  |
+| **Frequency**   | Once per failed interaction, per worker. The snapshot is captured once and reused across retries, key rotation, and provider failover. |
+| **Retention**   | Governed entirely by your contract with the provider. This framework has no control over it.                                           |
+
+### What is transmitted
+
+For every **visible interactive element** (`input`, `button`, `select`,
+`textarea`, `form`, `[role=button|textbox|searchbox|combobox|checkbox|radio]`,
+`[onclick]`, `[data-testid]`, `[data-test]`, `[data-cy]`):
+
+- The attributes `id`, `name`, `class`, `type`, `placeholder`, `aria-label`,
+  `role`, `href`, `title`, `alt`, `for`, `action`
+- Every `data-test*` and `data-cy*` attribute
+- Its **direct text content**, truncated to 80 characters
+
+For every **ancestor** of such an element: the tag name plus `id`, `name`, `role`.
+
+If the page contains **no interactive elements at all**, a fallback path
+serialises the entire `<body>` — all elements, and all text nodes truncated to
+100 characters each — with only the attribute allowlist above retained.
+
+### What is redacted
+
+| Rule                                                                             | Applies to                                                                                                                                                                                       |
+| -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `value` attributes → `[REDACTED]`                                                | `input` / `textarea`. On the primary path `value` is additionally not in the attribute allowlist, so it is never emitted at all; the redaction is defence in depth for anyone who later adds it. |
+| Email addresses → `[EMAIL]`                                                      | Text content, both paths                                                                                                                                                                         |
+| Phone numbers → `[PHONE]`                                                        | Text content, both paths                                                                                                                                                                         |
+| `class` attributes over 60 chars                                                 | Truncated                                                                                                                                                                                        |
+| `script`, `style`, `svg`, `link`, `meta`, `noscript`, `iframe`, `video`, `audio` | Dropped entirely                                                                                                                                                                                 |
+
+Elements hidden by CSS are skipped (`checkVisibility`). That is a snapshot-size
+optimisation, not a privacy control — do not rely on it.
+
+### Residual risk — what is NOT redacted
+
+This is the part that matters for a risk assessment. The scrubbing is two regexes.
+It does **not** remove:
+
+- **Names, postal addresses, postcodes, national IDs, dates of birth**
+- **Account numbers, order numbers, customer references, invoice IDs**
+- **Session tokens, JWTs, or API keys appearing in `href` query strings** — `href`
+  is on the transmitted allowlist in full
+- **Non-North-American phone numbers.** The phone regex is NANP-shaped
+  (`(+N) NNN-NNN-NNNN`); most international formats pass through untouched
+- **Anything in `aria-label`, `title`, `alt`, or element text** beyond emails and
+  phone numbers — e.g. `aria-label="Delete payment card ending 4242"`
+- **Free-text content of interactive elements**, which on many applications
+  includes the user's own name in a header menu button
+
+Treat the redaction as reducing incidental exposure, not as an anonymisation
+control, and never as a compliance boundary.
+
+### Controls available today
+
+| Control                                  | Effect                                                                                                                                                                                             |
+| ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Omit `GEMINI_API_KEY` / `OPENAI_API_KEY` | The only complete opt-out. Note it is a blunt one: `resolveAIProvider` **throws**, so the run fails rather than proceeding with healing disabled. There is no graceful "healing off" switch today. |
+| `DOM_SNAPSHOT_CHAR_LIMIT`                | Reduces the volume transmitted per heal. Does not change what kinds of data are eligible.                                                                                                          |
+| `AI_PROVIDER`                            | Chooses which third party receives the data.                                                                                                                                                       |
+| Non-production test data                 | The effective mitigation. Nothing that never enters the page can leave it.                                                                                                                         |
+
+### Known gaps
+
+These are not implemented and should be assumed absent when assessing risk:
+
+- No graceful "healing disabled" mode — unsetting the key aborts the run rather
+  than running the suite without healing
+- No per-test or per-page opt-out — healing is all-or-nothing for a run
+- No URL allowlist/denylist to suppress healing on sensitive routes
+- No configurable redaction rules or custom PII patterns
+- No local/self-hosted model option; both providers are external SaaS
+- No audit log of what was transmitted (snapshot **length** is recorded in
+  `HealingEvent.domSnapshotLength`; the content is not retained)
+
+### Guidance by environment
+
+- **Local development, synthetic data** — safe to enable.
+- **CI against a seeded staging environment** — safe to enable, provided the seed
+  data is synthetic. This is the intended deployment.
+- **Any environment containing real customer data** — do not enable healing.
+  Run with the API key unset. If you need healing signal, reproduce the failure
+  against seeded data instead.
+- **Regulated data (PCI / PHI / financial)** — do not enable. Sending cardholder
+  or health data to a general-purpose LLM endpoint will not survive an audit, and
+  the redaction above is not designed to make it do so.
+
+Before enabling healing against any environment you did not seed yourself, confirm:
+you have a data processing agreement with the provider, the provider's training-on-input
+setting is disabled for your account, and your DPIA covers LLM egress.
 
 ## Network Security
 
@@ -262,17 +355,33 @@ The framework is configured with secure defaults:
 - ✅ ESLint security rules enabled
 - ✅ No eval or dynamic code execution
 - ✅ AI-returned selectors validated via denylist + allowlist before use
-- ✅ Confidence threshold — healed selectors must match live DOM elements
+- ✅ Page HTML treated as untrusted in the healing prompt (delimiter neutralisation,
+  field sanitisation, explicit "data, not instructions" framing)
+- ✅ Healed selectors must resolve to exactly one live DOM element before use
+- ✅ No default endpoint or bundled credential — egress is impossible until an
+  API key is explicitly configured
 - ✅ Error messages don't leak sensitive info
+
+Note the scope of the selector gate: it establishes that a healed selector
+_resolves uniquely_, **not** that it points at the element originally intended.
+A unique selector aimed at the wrong element is accepted. See
+`tests/benchmark/healing-accuracy.spec.ts` for the accuracy oracle that measures
+this separately.
 
 ## Compliance
 
 ### GDPR Considerations
 
-- Don't send PII to AI providers without consent
-- Use anonymized test data
-- Review data processing agreements
-- Implement data retention policies
+Healing transmits page content to a third-party processor. See
+[Data Privacy](#data-privacy) for exactly what is sent and what the redaction
+does and does not cover.
+
+- Establish a data processing agreement with your AI provider before enabling healing
+- Disable training-on-input for your provider account
+- Ensure your DPIA covers LLM egress from the test environment
+- Use synthetic test data — the only complete mitigation
+- Treat the built-in email/phone scrubbing as incidental-exposure reduction,
+  **not** as anonymisation or pseudonymisation under Art. 4(5)
 
 ### Testing Guidelines
 
@@ -294,6 +403,10 @@ Before deploying:
 - [ ] Rate limits configured
 - [ ] Error handling doesn't expose internals
 - [ ] Security scan passed (CodeQL)
+- [ ] **The target environment contains no real customer data** — or healing is
+      disabled by leaving the provider API key unset
+- [ ] **Data processing agreement in place** with the configured AI provider
+- [ ] **Training-on-input disabled** for the provider account
 - [ ] npm audit shows no vulnerabilities
 
 ## Updates
