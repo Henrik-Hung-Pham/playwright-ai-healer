@@ -88,6 +88,11 @@ export default defineConfig({
             testDir: './tests/benchmark',
             testIgnore: [],
             use: { ...devices['Desktop Chrome'] },
+            // Serial within the file so the spec's module-level outcome array
+            // observes every case and can print one headline accuracy/refusal
+            // number. Parallel workers would each see a disjoint subset and
+            // report several partial summaries instead of one whole result.
+            fullyParallel: false,
         },
 
         // Desktop browsers - All major engines
