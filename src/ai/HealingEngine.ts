@@ -298,6 +298,22 @@ export class HealingEngine {
                     logger.warn(
                         `[HealingEngine:heal] 🛡️ HEALING REJECTED. AI-returned selector failed validation: "${parsed}"`
                     );
+                } else if (parsed.trim() === originalSelector.trim()) {
+                    // The reply is the selector that just failed. That is never a
+                    // repair — it is the model echoing the input, which reasoning
+                    // models do when they restate the problem before answering.
+                    //
+                    // Cheap to check and worth checking explicitly: the uniqueness
+                    // gate only catches this when the original resolves to zero
+                    // elements. A selector that fails for any *other* reason —
+                    // obscured by an overlay, detached mid-interaction, matching
+                    // several elements — still resolves, so an echo would sail
+                    // through scoring and be re-tried (and persisted) as if it
+                    // were a fix.
+                    logger.warn(
+                        `[HealingEngine:heal] 🛡️ HEALING REJECTED. Model returned the original selector ` +
+                            `unchanged: "${parsed}". An echo of the failing selector is not a repair.`
+                    );
                 } else {
                     // The model frequently returns a semantically-correct but ambiguous
                     // selector for a repeated element (e.g. `article` matching every book
