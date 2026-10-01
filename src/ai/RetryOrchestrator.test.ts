@@ -119,7 +119,7 @@ describe('RetryOrchestrator', () => {
         it('should rotate key on 401 and retry', async () => {
             const client = makeMockClientManager({
                 rotateKey: vi.fn().mockReturnValue(true),
-            } as unknown as Partial<AIClientManager>);
+            });
             const orchestrator = new RetryOrchestrator(client);
 
             const operation = vi
@@ -137,7 +137,7 @@ describe('RetryOrchestrator', () => {
             const client = makeMockClientManager({
                 switchProvider: vi.fn().mockReturnValue(true),
                 getKeyCount: vi.fn().mockReturnValue(1),
-            } as unknown as Partial<AIClientManager>);
+            });
             const orchestrator = new RetryOrchestrator(client);
 
             const operation = vi
@@ -170,7 +170,7 @@ describe('RetryOrchestrator', () => {
                 rotateKey: vi.fn().mockReturnValue(false), // no more keys
                 switchProvider: vi.fn().mockReturnValue(true),
                 getKeyCount: vi.fn().mockReturnValue(1),
-            } as unknown as Partial<AIClientManager>);
+            });
             const orchestrator = new RetryOrchestrator(client);
 
             const operation = vi
@@ -193,7 +193,7 @@ describe('RetryOrchestrator', () => {
                 rotateKey: vi.fn().mockReturnValue(false),
                 switchProvider: vi.fn().mockReturnValue(false),
                 getKeyCount: vi.fn().mockReturnValue(1),
-            } as unknown as Partial<AIClientManager>);
+            });
             const orchestrator = new RetryOrchestrator(client);
 
             const operation = vi.fn().mockRejectedValue(makeError(429, 'Rate limit'));

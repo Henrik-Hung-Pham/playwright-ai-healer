@@ -42,7 +42,7 @@ const createMockPage = (): Partial<Page> => {
         waitForSelector: vi.fn(),
         evaluate: vi.fn().mockResolvedValue('<html><body><button id="btn">Click</button></body></html>'),
         locator: vi.fn().mockReturnValue(mockLocatorHandle),
-    } as unknown as Partial<Page>;
+    };
 };
 
 describe('AutoHealer', () => {
