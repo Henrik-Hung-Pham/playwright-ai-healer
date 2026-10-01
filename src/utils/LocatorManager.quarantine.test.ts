@@ -1,5 +1,16 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import type { MetricsStore } from '../types.js';
+import type { HealProvenance, MetricsStore } from '../types.js';
+
+/** Minimal provenance record — these tests only care about `previousSelector`. */
+const provenanceFor = (previousSelector: string): HealProvenance => ({
+    previousSelector,
+    healedSelector: '#healed',
+    healedAt: new Date().toISOString(),
+    provider: 'gemini',
+    model: 'gemma-4-31b-it',
+    confidence: 0.9,
+    strategy: 'id',
+});
 
 /**
  * Selector-quarantine tests.
@@ -211,7 +222,7 @@ describe('selector quarantine', () => {
         it('stores the replaced selector as the rollback target', async () => {
             const manager = await managerWith({ app: { btn: '#healed' } }, {});
 
-            await manager.recordSelectorHealed('app.btn', '#original');
+            await manager.recordSelectorHealed('app.btn', provenanceFor('#original'));
 
             const metrics = persistedMetrics('app.btn');
             expect(metrics?.previousSelector).toBe('#original');
@@ -224,7 +235,7 @@ describe('selector quarantine', () => {
                 'app.btn': { failureCount: 2, healedAt: HEALED_AT, previousSelector: '#older' },
             });
 
-            await manager.recordSelectorHealed('app.btn', '#original');
+            await manager.recordSelectorHealed('app.btn', provenanceFor('#original'));
 
             expect(persistedMetrics('app.btn')?.failureCount).toBe(0);
             // The rollback target tracks the most recent heal, not the first one.

@@ -87,7 +87,10 @@ Environment is selected by `TEST_ENV` variable (`dev`/`staging`/`prod`). The con
 - `OPENAI_API_KEY` / `OPENAI_API_KEYS` (comma-separated for rotation) — required if provider is `openai`
 - `BASE_URL`, `LOG_LEVEL`, `HEADLESS`, `TEST_TIMEOUT`
 - `SELECTOR_QUARANTINE_THRESHOLD` — consecutive post-heal failures before a healed selector is
-  rolled back to the value it replaced (default `3`, minimum `1`)
+  automatically rolled back to the value it replaced (default `3`, minimum `1`). Every persisted
+  heal also records a `HealProvenance` entry (previous selector, model, provider, confidence,
+  strategy) in `metrics.json`, which `LocatorManager.revertLocator()` can walk back through
+  manually, one heal at a time, independent of the automatic threshold above.
 
 ### TypeScript Conventions
 
