@@ -57,13 +57,24 @@ export const test = base.extend<MyFixtures, MyWorkerFixtures>({
     ],
 
     autoHealer: async ({ page }, use) => {
+        // HEALING_MODE=off must not require a credential — `resolveAIProvider`
+        // throws when the selected provider has no key, so calling it here would
+        // abort the run and defeat the kill switch. AutoHealer short-circuits
+        // before reaching the client in this mode, so an empty key list is never
+        // dereferenced.
+        if (config.ai.healing.mode === 'off') {
+            logger.debug('[Fixture] HEALING_MODE=off — AutoHealer constructed without an AI client.');
+            await use(new AutoHealer(page, [], config.ai.provider, undefined, true));
+            return;
+        }
+
         // Provider selection is `AI_PROVIDER`'s job, delegated to
         // `resolveAIProvider` so it is unit-testable. This fixture used to pick by
         // key presence instead — `if (ai.gemini.apiKey) … else if (openai) …` —
         // which silently ran Gemini whenever a GEMINI_API_KEY happened to be set,
         // even with AI_PROVIDER=openai.
         const { provider, apiKeys, modelName } = resolveAIProvider(config.ai);
-        logger.debug(`[Fixture] AI_PROVIDER=${provider}, model=${modelName}`);
+        logger.debug(`[Fixture] AI_PROVIDER=${provider}, model=${modelName}, HEALING_MODE=${config.ai.healing.mode}`);
 
         const healer = new AutoHealer(page, apiKeys, provider, modelName, true);
         await use(healer);

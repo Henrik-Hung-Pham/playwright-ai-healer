@@ -13,6 +13,31 @@ export type AIProvider = 'openai' | 'gemini';
 export type SelectorStrategy = 'id' | 'css' | 'xpath' | 'text' | 'role' | 'data-testid';
 
 /**
+ * What healing is permitted to do when an interaction fails. Set via `HEALING_MODE`.
+ *
+ * - `off` — do not heal. The original Playwright error propagates untouched, no
+ *   DOM snapshot leaves the process, and no API key is required. The graceful
+ *   kill switch: previously the only way to disable healing was to unset the API
+ *   key, which makes `resolveAIProvider` throw and aborts the whole run.
+ *
+ * - `suggest` — heal, score, and record the result, but **do not apply it**. The
+ *   test still fails with its original error, and the suggested selector is
+ *   attached as a test annotation and included in the healing report. Nothing is
+ *   persisted to the locator store.
+ *
+ *   This is the mode that makes healing safe to run in CI. Under `apply`, a heal
+ *   that succeeds against a genuinely broken feature turns a real regression
+ *   green — the suite passes while the thing under test was never exercised.
+ *   `suggest` keeps the failure signal and still tells you what would have fixed
+ *   it, leaving a human to decide whether the selector drifted or the feature
+ *   broke.
+ *
+ * - `apply` — heal, apply, and persist. The historical behaviour, and still the
+ *   default so existing setups are unchanged.
+ */
+export type HealingMode = 'off' | 'suggest' | 'apply';
+
+/**
  * Structured result from an AI healing attempt
  */
 export interface HealingResult {
@@ -193,6 +218,8 @@ export interface AIConfig {
         apiKey?: string;
     };
     healing: {
+        /** What healing is permitted to do. See {@link HealingMode}. */
+        mode: HealingMode;
         /** Maximum number of AI retry attempts per healing event. */
         maxRetries: number;
         /** Delay in milliseconds between retry attempts. */
