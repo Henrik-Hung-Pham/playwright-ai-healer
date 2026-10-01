@@ -275,8 +275,17 @@ export class HealingEngine {
 
             let rawResult: string | undefined;
             try {
-                const { result: aiResult } = await orchestrator.execute(() =>
-                    this.clientManager.makeRequest(promptText, config.test.timeouts.default)
+                // The budget bounds the heal as a whole; each request's own timeout is
+                // capped to what is left of it, so a slow final attempt cannot run on
+                // past the budget and into the test timeout.
+                const { result: aiResult } = await orchestrator.execute(
+                    remainingMs =>
+                        this.clientManager.makeRequest(promptText, Math.min(config.test.timeouts.default, remainingMs)),
+                    {
+                        maxRetries: config.ai.healing.maxRetries,
+                        baseDelayMs: config.ai.healing.retryDelay,
+                        budgetMs: config.ai.healing.budgetMs,
+                    }
                 );
                 rawResult = aiResult.raw;
                 tokensUsed = aiResult.tokensUsed;
