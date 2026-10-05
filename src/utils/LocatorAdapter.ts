@@ -51,8 +51,64 @@ export class FileAdapter implements LocatorAdapter {
     private readonly locatorsPath: string;
     private locators: LocatorStore = {};
 
+    /**
+     * Identity of the file contents currently held in {@link locators}, used to
+     * detect writes made by other processes. `null` means "nothing cached yet".
+     *
+     * @see refreshIfStale
+     */
+    private cachedStamp: string | null = null;
+
     constructor(locatorsPath?: string) {
         this.locatorsPath = locatorsPath ?? path.resolve(__dirname, '../config/locators.json');
+        this.load();
+    }
+
+    /**
+     * Cheap content-identity stamp for the store file: modification time plus
+     * size. Returns `null` when the file does not exist or cannot be stat'ed.
+     *
+     * Size is folded in because `mtime` resolution is filesystem-dependent (1s
+     * on some older filesystems), so two writes inside the same tick could share
+     * an mtime. A selector edit almost always changes the serialized length, so
+     * the pair is a far tighter signal than mtime alone. This is a cache-freshness
+     * heuristic, not a correctness barrier — `updateLocator` still re-reads
+     * unconditionally under the file lock, which is what actually guarantees no
+     * write is lost.
+     */
+    private currentStamp(): string | null {
+        try {
+            const stat = fs.statSync(this.locatorsPath);
+            return `${stat.mtimeMs}:${stat.size}`;
+        } catch {
+            return null;
+        }
+    }
+
+    /**
+     * Reload the store from disk if another process has written to it.
+     *
+     * Playwright runs workers as **separate OS processes**, each holding its own
+     * `FileAdapter` with its own in-memory copy. That copy was previously
+     * populated once in the constructor and refreshed only inside
+     * `updateLocator`, so a heal performed by worker A was invisible to workers
+     * B…N for the remainder of the run: they kept resolving the stale, known-broken
+     * selector and paid for a fresh AI heal of the key that had already been
+     * repaired — N times over, once per worker.
+     *
+     * A `stat` on every read is the cost of fixing that. It is a single syscall
+     * (microseconds) against a Playwright action measured in milliseconds, and it
+     * only re-parses the JSON when the stamp actually changes.
+     */
+    private refreshIfStale(): void {
+        const stamp = this.currentStamp();
+        // Reload only when the stamp is both readable and different.
+        //
+        // An unreadable stamp (file absent or inaccessible) is deliberately NOT
+        // treated as "stale". There is nothing newer on disk to read, so a
+        // reload could only discard the in-memory copy — including a selector
+        // this process just wrote through `updateLocator`.
+        if (stamp === null || stamp === this.cachedStamp) return;
         this.load();
     }
 
@@ -61,14 +117,19 @@ export class FileAdapter implements LocatorAdapter {
             if (fs.existsSync(this.locatorsPath)) {
                 this.locators = JSON.parse(fs.readFileSync(this.locatorsPath, 'utf-8')) as LocatorStore;
             }
+            this.cachedStamp = this.currentStamp();
         } catch (err) {
             logger.error(`[FileAdapter] ❌ Failed to load locators: ${String(err)}`);
             this.locators = {};
+            // Leave the stamp unset so a later read retries rather than caching
+            // the failure for the rest of the run.
+            this.cachedStamp = null;
         }
     }
 
     getLocator(key: string): string | null {
         try {
+            this.refreshIfStale();
             const parts = key.split('.');
             let current: string | LocatorStore | undefined = this.locators;
             for (const part of parts) {
@@ -104,6 +165,9 @@ export class FileAdapter implements LocatorAdapter {
                 current[lastPart] = selector;
             }
             fs.writeFileSync(this.locatorsPath, JSON.stringify(this.locators, null, 2), 'utf-8');
+            // Re-stamp after our own write, so the very next read does not see a
+            // changed mtime and needlessly re-parse a file we just authored.
+            this.cachedStamp = this.currentStamp();
             logger.info(`[FileAdapter] 💾 Updated '${key}' → '${selector}'`);
         } catch (err) {
             logger.error(`[FileAdapter] ❌ updateLocator failed for '${key}': ${String(err)}`);
@@ -114,6 +178,7 @@ export class FileAdapter implements LocatorAdapter {
     }
 
     getAllLocators(): Record<string, string> {
+        this.refreshIfStale();
         const flat: Record<string, string> = {};
         const flatten = (obj: LocatorStore, prefix: string) => {
             for (const [k, v] of Object.entries(obj)) {
