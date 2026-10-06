@@ -64,7 +64,11 @@ export function buildHealingPrompt(selector: string, error: string, html: string
       intended to interact with.
 
       CRITICAL INSTRUCTIONS:
-      1. Return ONLY the new selector as a plain string.
+      1. Return up to 5 candidate selectors, ONE PER LINE, best guess first, and
+         nothing else. Each line must be a plain selector string. Returning
+         several is preferred: every candidate is scored against the live DOM and
+         against a record of the element from when the test last passed, so a
+         weaker guess costs nothing and a shortlist beats one confident mistake.
       2. DO NOT return markdown formatting like backticks (e.g. no \`#selector\`).
       3. Use the original selector name as a semantic clue about the element's purpose, not a literal ID to match.
       4. The selector MUST resolve to EXACTLY ONE element. A selector matching several
