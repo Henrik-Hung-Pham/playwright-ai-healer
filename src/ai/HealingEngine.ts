@@ -291,16 +291,24 @@ export class HealingEngine {
             }
 
             let rawResult: string | undefined;
+            let sawRateLimit = false;
             try {
+                // Watch every attempt, not just the error that escapes: after a 429
+                // the orchestrator fails over, and the error it finally throws may
+                // come from the fallback (e.g. a 401 on an unconfigured provider)
+                // even though the root cause was the rate limit.
                 const { result: aiResult } = await orchestrator.execute(() =>
-                    this.clientManager.makeRequest(promptText, config.test.timeouts.default)
+                    this.clientManager.makeRequest(promptText, config.test.timeouts.default).catch((err: unknown) => {
+                        if (isRateLimitError(err as AIError)) sawRateLimit = true;
+                        throw err;
+                    })
                 );
                 rawResult = aiResult.raw;
                 tokensUsed = aiResult.tokensUsed;
                 logger.info(`[HealingEngine:heal] ✅ AI request succeeded.`);
                 this.getCircuitBreaker(this.clientManager.getProvider()).onSuccess();
-            } catch (requestError) {
-                rateLimited = isRateLimitError(requestError as AIError);
+            } catch {
+                rateLimited = sawRateLimit;
                 logger.error(
                     `[HealingEngine:heal] ❌ All retry strategies exhausted${rateLimited ? ' (rate-limited)' : ''}.`
                 );
