@@ -55,6 +55,11 @@ export interface HealingEvent {
     };
     /** Character length of the DOM snapshot sent to the AI */
     domSnapshotLength?: number;
+    /**
+     * `true` when the AI request was ultimately rejected with a rate-limit /
+     * quota error (HTTP 429), i.e. the provider never answered. Absent otherwise.
+     */
+    rateLimited?: boolean;
 }
 
 /**
