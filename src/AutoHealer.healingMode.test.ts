@@ -25,6 +25,7 @@ const { mockLocatorManager } = vi.hoisted(() => ({
         updateLocator: vi.fn().mockResolvedValue(undefined),
         recordSelectorFailure: vi.fn().mockResolvedValue({ recorded: true, failureCount: 1, quarantined: false }),
         recordSelectorHealed: vi.fn(),
+        getFingerprint: vi.fn(() => null),
     },
 }));
 
