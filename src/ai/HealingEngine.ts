@@ -3,7 +3,8 @@ import { config } from '../config/index.js';
 import { logger } from '../utils/Logger.js';
 import type { AIClientManager } from './AIClientManager.js';
 import { getSimplifiedDOM } from './DOMSerializer.js';
-import { parseAIResponse } from './ResponseParser.js';
+import { parseAIResponse, parseAICandidates } from './ResponseParser.js';
+import { captureFingerprint, compareFingerprints, type ElementFingerprint } from './ElementFingerprint.js';
 import { validateSelector } from './SelectorValidator.js';
 import { scoreSelector } from './SelectorScorer.js';
 import { RetryOrchestrator } from './RetryOrchestrator.js';
@@ -44,6 +45,16 @@ export function hasPositionalSuffix(selector: string): boolean {
  * is deliberately out of scope; per-worker is a large improvement over per-test
  * and costs nothing.
  */
+/**
+ * How many candidate selectors to consider from a single reply.
+ *
+ * Each surviving candidate costs a `count()` and, when a fingerprint exists, a
+ * `captureFingerprint` — both cheap in-page calls, but not free. Five is enough
+ * to get past a confident wrong first answer without turning one heal into a
+ * dozen round-trips to the browser.
+ */
+const MAX_CANDIDATES = 5;
+
 const providerCircuitBreakers = new Map<string, CircuitBreaker>();
 
 /**
@@ -193,7 +204,12 @@ export class HealingEngine {
      * @param error - The error that occurred during the failed interaction
      * @returns A `HealingResult` if a valid replacement selector was found, `null` otherwise
      */
-    async heal(page: Page, originalSelector: string, error: Error): Promise<HealingResult | null> {
+    async heal(
+        page: Page,
+        originalSelector: string,
+        error: Error,
+        knownGood: ElementFingerprint | null = null
+    ): Promise<HealingResult | null> {
         const startTime = Date.now();
         logger.info(`[HealingEngine:heal] 🏥 ========== HEALING START ==========`);
         logger.info(`[HealingEngine:heal] 🎯 Original selector: "${originalSelector}"`);
@@ -297,59 +313,43 @@ export class HealingEngine {
                 return null;
             }
 
-            // 4. Parse and validate AI result
+            // 4. Rank every candidate the model offered, not just its first.
+            //
+            // The model is treated as a candidate *generator* rather than an
+            // oracle: when its first choice is a decoy, a later one is often
+            // correct, and with a stored fingerprint the framework can tell them
+            // apart on evidence instead of accepting whatever parses first.
             logger.info(`[HealingEngine:heal] 🔬 Step 4: Processing AI result. Raw result: "${rawResult}"`);
-            const parsed = parseAIResponse(rawResult);
+            // Ranking is only enabled when there is a fingerprint to rank
+            // *against*. Without one, every unique candidate scores identically
+            // — uniqueness and strategy cannot tell two unique `data-testid`
+            // selectors apart — so the winner is decided by list order, and the
+            // model's order is not reliably best-first. The accuracy benchmark
+            // caught exactly this: asked to repair `[data-testid="promo-code"]`,
+            // the model listed the search field before the discount field, and
+            // order-based tie-breaking picked the search field. The single-answer
+            // parser had been choosing correctly.
+            //
+            // So: with evidence, rank. Without evidence, do not guess differently
+            // than before.
+            const candidates = knownGood
+                ? parseAICandidates(rawResult, MAX_CANDIDATES)
+                : [parseAIResponse(rawResult)].filter((s): s is string => Boolean(s));
+            logger.info(
+                `[HealingEngine:heal] 🎰 ${candidates.length} candidate(s)${knownGood ? '' : ' (no fingerprint — ranking disabled)'}: ` +
+                    `${candidates.map(c => `"${c}"`).join(', ') || 'none'}`
+            );
 
-            if (parsed) {
-                // Validate selector safety before using it
-                if (!validateSelector(parsed)) {
-                    logger.warn(
-                        `[HealingEngine:heal] 🛡️ HEALING REJECTED. AI-returned selector failed validation: "${parsed}"`
-                    );
-                } else {
-                    // The model frequently returns a semantically-correct but ambiguous
-                    // selector for a repeated element (e.g. `article` matching every book
-                    // card). The prompt asks it to disambiguate with `>> nth=0`, but models
-                    // comply unreliably — and at temperature 0 the same ambiguous answer
-                    // repeats on every retry, so it can never self-correct. Apply the same
-                    // disambiguation strategy deterministically here: when the selector
-                    // matches several elements and carries no positional suffix, pin it to
-                    // the first match and re-check before scoring.
-                    const selector = await this.disambiguateIfAmbiguous(page, parsed);
-
-                    // Score the healed selector against the live DOM. Confidence is
-                    // derived from real signal — match uniqueness and selector-strategy
-                    // stability — not a binary "matched something" flag.
-                    const elementCount = await countMatches(page, selector);
-                    if (elementCount === null) {
-                        logger.warn(
-                            `[HealingEngine:heal] 🛡️ HEALING REJECTED. Healed selector "${selector}" is not ` +
-                                `parseable as a selector.`
-                        );
-                    } else {
-                        const { confidence, strategy, reasoning } = scoreSelector(selector, elementCount);
-                        if (confidence < config.ai.healing.confidenceThreshold) {
-                            logger.warn(
-                                `[HealingEngine:heal] 🛡️ HEALING REJECTED. Healed selector "${selector}" scored too low ` +
-                                    `(confidence=${confidence} < threshold=${config.ai.healing.confidenceThreshold}). ${reasoning}`
-                            );
-                        } else {
-                            healingSuccess = true;
-                            healingResult = {
-                                selector,
-                                confidence,
-                                reasoning,
-                                strategy,
-                            };
-                            logger.info(
-                                `[HealingEngine:heal] ✨ HEALING SUCCEEDED! New selector: "${selector}" (confidence=${confidence}, strategy=${strategy})`
-                            );
-                        }
-                    }
-                }
+            const best = await this.rankCandidates(page, originalSelector, candidates, knownGood);
+            if (best) {
+                healingSuccess = true;
+                healingResult = best;
+                logger.info(
+                    `[HealingEngine:heal] ✨ HEALING SUCCEEDED! New selector: "${best.selector}" ` +
+                        `(confidence=${best.confidence}, strategy=${best.strategy})`
+                );
             } else {
-                logger.warn(`[HealingEngine:heal] 💔 HEALING FAILED. Result was: "${rawResult}" (FAIL or empty)`);
+                logger.warn(`[HealingEngine:heal] 💔 HEALING FAILED. No candidate cleared the confidence gate.`);
             }
         } catch (aiError) {
             const aiErrorTyped = aiError as Error;
@@ -382,5 +382,73 @@ export class HealingEngine {
         }
 
         return healingResult;
+    }
+
+    /**
+     * Score every candidate against the live DOM and return the strongest.
+     *
+     * Each candidate is validated, disambiguated, counted, and — when a
+     * last-known-good fingerprint exists — compared against it by capturing the
+     * element the candidate actually resolves to. The highest-confidence
+     * candidate that clears `confidenceThreshold` wins; ties keep the model's own
+     * ordering, since it was asked to list its best guess first.
+     *
+     * @param page - Page to evaluate candidates against.
+     * @param originalSelector - The failing selector, used to reject echoes.
+     * @param candidates - Ordered candidates from the model.
+     * @param knownGood - Fingerprint of this element from when it last worked.
+     * @returns The winning result, or `null` when none qualified.
+     * @private
+     */
+    private async rankCandidates(
+        page: Page,
+        originalSelector: string,
+        candidates: string[],
+        knownGood: ElementFingerprint | null
+    ): Promise<HealingResult | null> {
+        const threshold = config.ai.healing.confidenceThreshold;
+        let best: HealingResult | null = null;
+
+        for (const candidate of candidates) {
+            if (!validateSelector(candidate)) {
+                logger.warn(`[HealingEngine:rank] 🛡️ Rejected — failed validation: "${candidate}"`);
+                continue;
+            }
+
+            // An echo of the failing selector is never a repair; see the guard's
+            // rationale where it was introduced.
+            if (candidate.trim() === originalSelector.trim()) {
+                logger.warn(`[HealingEngine:rank] 🛡️ Rejected — echoes the original selector: "${candidate}"`);
+                continue;
+            }
+
+            const selector = await this.disambiguateIfAmbiguous(page, candidate);
+            const elementCount = await countMatches(page, selector);
+            if (elementCount === null) {
+                logger.warn(`[HealingEngine:rank] 🛡️ Rejected — not parseable: "${selector}"`);
+                continue;
+            }
+
+            // Comparing costs one page.evaluate per surviving candidate, so it is
+            // skipped when there is nothing to compare against.
+            let similarity: number | undefined;
+            if (knownGood && elementCount > 0) {
+                const observed = await captureFingerprint(page, selector);
+                similarity = observed ? compareFingerprints(knownGood, observed) : 0;
+            }
+
+            const { confidence, strategy, reasoning } = scoreSelector(selector, elementCount, similarity);
+            logger.info(
+                `[HealingEngine:rank] 📐 "${selector}" → confidence=${confidence} ` +
+                    `(threshold=${threshold}). ${reasoning}`
+            );
+
+            if (confidence < threshold) continue;
+            if (!best || confidence > best.confidence) {
+                best = { selector, confidence, reasoning, strategy };
+            }
+        }
+
+        return best;
     }
 }

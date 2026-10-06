@@ -51,7 +51,16 @@ vi.mock('../config/index.js', () => ({
 }));
 
 vi.mock('./DOMSerializer.js', () => ({ getSimplifiedDOM: mockGetSimplifiedDOM }));
-vi.mock('./ResponseParser.js', () => ({ parseAIResponse: mockParseAIResponse }));
+vi.mock('./ResponseParser.js', () => ({
+    parseAIResponse: mockParseAIResponse,
+    // The engine now ranks a candidate list. Existing cases drive a single
+    // selector through mockParseAIResponse, so lift that into a one-element
+    // list and their intent carries over unchanged.
+    parseAICandidates: (raw: string | undefined) => {
+        const single = mockParseAIResponse(raw);
+        return single ? [single] : [];
+    },
+}));
 vi.mock('./SelectorValidator.js', () => ({ validateSelector: mockValidateSelector }));
 
 // ---------------------------------------------------------------------------
