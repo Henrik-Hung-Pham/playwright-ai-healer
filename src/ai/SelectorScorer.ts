@@ -27,6 +27,20 @@ const STRATEGY_STABILITY_BONUS: Record<SelectorStrategy, number> = {
     xpath: 0.0,
 };
 
+/** Largest value in {@link STRATEGY_STABILITY_BONUS}, used to normalise it to 0–1. */
+const MAX_STABILITY_BONUS = 0.2;
+
+/**
+ * Weights for the fingerprint-aware score. They sum to 1.
+ *
+ * Similarity is weighted highest deliberately: uniqueness and strategy describe
+ * the *shape* of a selector, and only similarity speaks to whether it points at
+ * the element the test meant.
+ */
+const WEIGHT_UNIQUENESS = 0.4;
+const WEIGHT_STABILITY = 0.2;
+const WEIGHT_SIMILARITY = 0.4;
+
 /**
  * Infer the selector strategy from the raw selector string.
  *
@@ -68,7 +82,7 @@ export function detectStrategy(selector: string): SelectorStrategy {
  * @param matchCount - Number of elements the selector resolves to in the live DOM.
  * @returns A {@link SelectorScore} with confidence, detected strategy, and reasoning.
  */
-export function scoreSelector(selector: string, matchCount: number): SelectorScore {
+export function scoreSelector(selector: string, matchCount: number, similarity?: number): SelectorScore {
     const strategy = detectStrategy(selector);
 
     if (matchCount <= 0) {
@@ -79,17 +93,56 @@ export function scoreSelector(selector: string, matchCount: number): SelectorSco
         };
     }
 
-    // A single match is strong; multiple matches are ambiguous and risk a
-    // strict-mode violation when the action is retried.
-    const uniquenessScore = matchCount === 1 ? 0.8 : 0.5;
     const stabilityBonus = STRATEGY_STABILITY_BONUS[strategy];
-    const confidence = Math.min(1, Number((uniquenessScore + stabilityBonus).toFixed(2)));
+
+    // ── Without a fingerprint: uniqueness + strategy stability ────────────────
+    //
+    // Preserved verbatim as the fallback for keys that have never been observed
+    // working (an inline selector, or a first-ever run). Note its ceiling on
+    // discrimination: the *minimum* score for a unique selector is 0.8 (bare
+    // XPath), so against the 0.7 default no unique selector is ever rejected.
+    // The gate can only answer "does this resolve to one element", never "is it
+    // the right element" — which is precisely what the branch below fixes.
+    if (similarity === undefined) {
+        const uniquenessScore = matchCount === 1 ? 0.8 : 0.5;
+        const confidence = Math.min(1, Number((uniquenessScore + stabilityBonus).toFixed(2)));
+
+        return {
+            confidence,
+            strategy,
+            reasoning:
+                `Resolved to ${matchCount} element(s) via a ${strategy} selector ` +
+                `(uniqueness=${uniquenessScore}, stability bonus=${stabilityBonus}). ` +
+                `No stored fingerprint for this key, so element identity was not verified.`,
+        };
+    }
+
+    // ── With a fingerprint: uniqueness + stability + element identity ─────────
+    //
+    // Similarity carries the largest single weight because it is the only term
+    // that measures whether the candidate is the element the test meant, rather
+    // than merely a well-formed handle to *some* element.
+    //
+    // The arithmetic is what gives the threshold teeth: a unique, id-based
+    // selector pointing at a completely unrelated element scores
+    // 0.4 + 0.2 + 0 = 0.6, below the 0.7 default, and is rejected. Under the
+    // fallback above the same selector scores 1.0 and is accepted.
+    const uniqueness = matchCount === 1 ? 1 : 0.5;
+    const stability = stabilityBonus / MAX_STABILITY_BONUS;
+    const clampedSimilarity = Math.min(1, Math.max(0, similarity));
+
+    const confidence = Number(
+        (WEIGHT_UNIQUENESS * uniqueness + WEIGHT_STABILITY * stability + WEIGHT_SIMILARITY * clampedSimilarity).toFixed(
+            4
+        )
+    );
 
     return {
         confidence,
         strategy,
         reasoning:
-            `Resolved to ${matchCount} element(s) via a ${strategy} selector ` +
-            `(uniqueness=${uniquenessScore}, stability bonus=${stabilityBonus}).`,
+            `Resolved to ${matchCount} element(s) via a ${strategy} selector, ` +
+            `with ${(clampedSimilarity * 100).toFixed(0)}% similarity to the last known-good element ` +
+            `(uniqueness=${uniqueness}, stability=${stability.toFixed(2)}).`,
     };
 }
