@@ -19,10 +19,11 @@ export interface AICallResult {
  * cleaner cannot reduce to a usable selector.
  */
 const SELECTOR_SYSTEM_INSTRUCTION =
-    'You are a selector-healing engine. Reply with exactly one CSS or Playwright ' +
-    'selector string and nothing else — no explanation, no reasoning, no markdown, ' +
-    'no code fences, no backticks, no surrounding quotes. If no element in the ' +
-    'provided HTML fits, reply with exactly: FAIL';
+    'You are a selector-healing engine. Reply with up to 5 CSS or Playwright ' +
+    'selector strings, one per line, best guess first, and nothing else — no ' +
+    'explanation, no reasoning, no markdown, no code fences, no backticks, no ' +
+    'surrounding quotes, no numbering. If no element in the provided HTML fits, ' +
+    'reply with exactly: FAIL';
 
 /**
  * Deterministic decoding temperature for selector healing.
