@@ -64,6 +64,8 @@ vi.mock('../../src/utils/LocatorManager.js', () => ({
                 quarantined: false,
             }),
             recordSelectorHealed: vi.fn(),
+            getFingerprint: vi.fn(() => null),
+            recordFingerprint: vi.fn().mockResolvedValue(undefined),
         })),
     },
 }));
@@ -143,6 +145,8 @@ describe('AutoHealer Core Logic', () => {
             updateLocator: mockUpdateLocator,
             recordSelectorFailure: mockRecordSelectorFailure,
             recordSelectorHealed: mockRecordSelectorHealed,
+            getFingerprint: vi.fn(() => null),
+            recordFingerprint: vi.fn().mockResolvedValue(undefined),
         } as unknown as LocatorManager);
 
         autoHealer = new AutoHealer(mockPage as unknown as Page, 'mock-key', 'gemini');

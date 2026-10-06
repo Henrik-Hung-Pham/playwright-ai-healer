@@ -14,6 +14,8 @@ const { mockLocatorManager } = vi.hoisted(() => {
             // to report a rollback.
             recordSelectorFailure: vi.fn().mockResolvedValue({ recorded: true, failureCount: 1, quarantined: false }),
             recordSelectorHealed: vi.fn(),
+            getFingerprint: vi.fn(() => null),
+            recordFingerprint: vi.fn().mockResolvedValue(undefined),
         },
     };
 });
