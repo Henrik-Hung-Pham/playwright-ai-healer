@@ -57,6 +57,63 @@ export function parseAIResponse(raw: string | undefined): string | null {
     return result || null;
 }
 
+/**
+ * Extract every plausible selector from a reply, best-guess first.
+ *
+ * A single reply is a single hypothesis. Asking the model for several and
+ * ranking them against the live DOM turns the model into a *candidate
+ * generator* rather than an oracle — when its first choice is a decoy, a later
+ * one is often correct, and the framework can now tell them apart on evidence
+ * rather than accepting the first thing that parses.
+ *
+ * Ordering follows the model's own: code spans and fenced lines are read in
+ * document order, and the model is asked to list its best guess first. Duplicates
+ * are collapsed, keeping the earliest occurrence.
+ *
+ * @param raw - Raw provider output.
+ * @param limit - Maximum candidates to return.
+ * @returns Ordered, de-duplicated candidates. Empty when the reply is a refusal.
+ */
+export function parseAICandidates(raw: string | undefined, limit = 5): string[] {
+    if (!raw) return [];
+    const text = raw.trim();
+    if (!text || text === 'FAIL') return [];
+
+    const fencedBodies: string[] = [];
+    const prose = text.replace(/```[a-zA-Z]*\r?\n?([\s\S]*?)```/g, (_match, body: string) => {
+        fencedBodies.push(body);
+        return '\n';
+    });
+
+    const inlineSpans = Array.from(prose.matchAll(/`([^`\n]+)`/g), match => (match[1] ?? '').trim()).filter(Boolean);
+
+    const ordered = [...inlineSpans, ...fencedBodies.flatMap(splitLines), ...splitLines(prose)];
+
+    const seen = new Set<string>();
+    const candidates: string[] = [];
+    for (const entry of ordered) {
+        // Quotes are stripped *before* the shape test: `isSelectorLike` requires
+        // the line to start with a selector token, so a quoted answer like
+        // `"#submit"` would otherwise be discarded as prose.
+        const cleaned = stripSurroundingQuotes(entry.trim()).trim();
+        if (!isSelectorLike(cleaned)) continue;
+        if (!cleaned || cleaned === 'FAIL' || seen.has(cleaned)) continue;
+        seen.add(cleaned);
+        candidates.push(cleaned);
+        if (candidates.length >= limit) break;
+    }
+
+    // Fall back to the single-answer parser so a reply that yields no
+    // selector-like line still produces something for validation to reject,
+    // matching the existing contract rather than silently returning nothing.
+    if (candidates.length === 0) {
+        const single = parseAIResponse(raw);
+        return single ? [single] : [];
+    }
+
+    return candidates;
+}
+
 /** Split into trimmed, non-empty lines. */
 function splitLines(text: string): string[] {
     return text
