@@ -1,16 +1,16 @@
 {
-    "test": {
-        "concurrentString": "value-0"
-    },
-    "booksToScrape": {
-        "categoryLink": ".side_categories ul li ul li a",
-        "bookCard": "article.product_pod",
-        "bookTitle": "article.product_pod h3 a",
-        "bookPrice": ".price_color",
-        "addToCartButton": ".btn-primary.btn-block",
-        "nextPageButton": ".pager .next a",
-        "bookDetailTitle": ".product_main h1",
-        "bookDetailPrice": ".product_main .price_color",
-        "breadcrumb": ".breadcrumb li"
-    }
+  "test": {
+    "concurrentString": "value-0"
+  },
+  "booksToScrape": {
+    "categoryLink": ".side_categories ul li ul li a",
+    "bookCard": "article.product_pod",
+    "bookTitle": "article.product_pod h3 a",
+    "bookPrice": ".price_color",
+    "addToCartButton": ".btn-primary.btn-block",
+    "nextPageButton": ".pager .next a",
+    "bookDetailTitle": ".product_main h1",
+    "bookDetailPrice": ".product_main .price_color",
+    "breadcrumb": ".breadcrumb li"
+  }
 }
