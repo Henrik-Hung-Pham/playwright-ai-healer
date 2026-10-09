@@ -80,6 +80,12 @@ export interface HealingEvent {
     };
     /** Character length of the DOM snapshot sent to the AI */
     domSnapshotLength?: number;
+    /**
+     * `true` when no provider returned an answer and at least one attempt was
+     * rejected with a rate-limit / quota error (HTTP 429) — even if failover
+     * then ended on a different error. Absent otherwise.
+     */
+    rateLimited?: boolean;
 }
 
 /**
