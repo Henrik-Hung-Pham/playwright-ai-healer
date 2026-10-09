@@ -1,4 +1,4 @@
-import { test, expect } from './fixtures/base.js';
+import { test, expect, skipIfRateLimited } from './fixtures/base.js';
 
 test.describe('Books to Scrape E2E Tests', () => {
     test.describe('Browse & Verify', () => {
@@ -88,9 +88,11 @@ test.describe('Books to Scrape E2E Tests', () => {
 
             // Use a broken selector that the AI should heal
             // by finding the correct book card element
-            await booksPage.safeClick('#nonexistent-book-card-xyz', {
-                timeout: 10000,
-            });
+            await skipIfRateLimited(autoHealer, () =>
+                booksPage.safeClick('#nonexistent-book-card-xyz', {
+                    timeout: 10000,
+                })
+            );
 
             const events = autoHealer!.getHealingEvents();
             expect(events.length).toBeGreaterThan(0);
