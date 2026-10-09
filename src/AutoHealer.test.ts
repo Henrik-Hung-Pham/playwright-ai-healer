@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { Page } from '@playwright/test';
-import { mockGeminiGenerateContent } from './test-setup.js';
+import { mockGeminiGenerateContent, mockOpenaiCreate } from './test-setup.js';
 import { AutoHealer } from './AutoHealer.js';
 import { validateSelector } from './ai/SelectorValidator.js';
 
@@ -27,12 +27,22 @@ vi.mock('./utils/LocatorManager.js', () => ({
     },
 }));
 
+/**
+ * Match count that models a genuinely broken selector: nothing matches until the
+ * AI has been asked, and exactly one element matches afterwards (the healed
+ * selector). AutoHealer only heals when the failing selector no longer resolves
+ * to one element, so a flat `count() === 1` would describe a working selector
+ * whose interaction failed for some other reason — which is not healed.
+ */
+const brokenThenHealedCount = () =>
+    Promise.resolve(mockGeminiGenerateContent.mock.calls.length + mockOpenaiCreate.mock.calls.length > 0 ? 1 : 0);
+
 // Mock page factory — includes all methods exercised by the 8 public action methods
 const createMockPage = (): Partial<Page> => {
     const mockLocatorHandle = {
         waitFor: vi.fn().mockResolvedValue(undefined),
         pressSequentially: vi.fn().mockResolvedValue(undefined),
-        count: vi.fn().mockResolvedValue(1),
+        count: vi.fn(brokenThenHealedCount),
     };
     return {
         click: vi.fn(),
@@ -470,7 +480,7 @@ describe('AutoHealer', () => {
             const mockLocatorHandle = {
                 waitFor: vi.fn().mockResolvedValue(undefined),
                 pressSequentially: pressSequentiallyMock,
-                count: vi.fn().mockResolvedValue(1),
+                count: vi.fn(brokenThenHealedCount),
             };
             (mockPage.locator as ReturnType<typeof vi.fn>).mockReturnValue(mockLocatorHandle);
 
@@ -595,6 +605,87 @@ describe('AutoHealer', () => {
             expect(events.length).toBe(1);
             expect(events[0]!.originalSelector).toBe('#broken');
             expect(events[0]!.success).toBe(true);
+        });
+    });
+
+    describe('heal gate — only broken selectors are healed', () => {
+        const setOriginalCount = (count: () => Promise<number>) => {
+            (mockPage.locator as ReturnType<typeof vi.fn>).mockReturnValue({
+                waitFor: vi.fn().mockResolvedValue(undefined),
+                count: vi.fn(count),
+            });
+        };
+
+        it('rethrows the original error when the selector still resolves to exactly one element', async () => {
+            // The element is there — it is just not clickable (disabled, covered, …).
+            // Asking the AI for a *different* element would mask a real regression.
+            setOriginalCount(() => Promise.resolve(1));
+            const original = new Error('Element is not enabled');
+            (mockPage.click as ReturnType<typeof vi.fn>).mockRejectedValue(original);
+
+            const healer = new AutoHealer(mockPage as Page, 'test-key', 'gemini');
+
+            await expect(healer.click('app.btn')).rejects.toBe(original);
+            expect(mockGeminiGenerateContent).not.toHaveBeenCalled();
+            expect(mockLocatorManager.recordSelectorFailure).not.toHaveBeenCalled();
+            expect(mockLocatorManager.updateLocator).not.toHaveBeenCalled();
+        });
+
+        it('heals when the selector matches several elements (strict-mode violation)', async () => {
+            let calls = 0;
+            // Ambiguous original, then the healed selector resolves uniquely.
+            setOriginalCount(() => Promise.resolve(calls++ === 0 ? 2 : 1));
+            (mockPage.click as ReturnType<typeof vi.fn>)
+                .mockRejectedValueOnce(new Error('strict mode violation: resolved to 2 elements'))
+                .mockResolvedValueOnce(undefined);
+
+            const healer = new AutoHealer(mockPage as Page, 'test-key', 'gemini');
+            await healer.click('#ambiguous');
+
+            expect(mockGeminiGenerateContent).toHaveBeenCalled();
+            expect(mockPage.click).toHaveBeenLastCalledWith('#healed-selector', undefined);
+        });
+
+        it('heals when the selector is not even parseable', async () => {
+            let calls = 0;
+            setOriginalCount(() =>
+                calls++ === 0 ? Promise.reject(new Error('Unexpected token')) : Promise.resolve(1)
+            );
+            (mockPage.click as ReturnType<typeof vi.fn>)
+                .mockRejectedValueOnce(new Error('Unexpected token'))
+                .mockResolvedValueOnce(undefined);
+
+            const healer = new AutoHealer(mockPage as Page, 'test-key', 'gemini');
+            await healer.click('div[[');
+
+            expect(mockGeminiGenerateContent).toHaveBeenCalled();
+        });
+
+        it('rethrows the original error when the page has closed', async () => {
+            const original = new Error('Target page, context or browser has been closed');
+            (mockPage.click as ReturnType<typeof vi.fn>).mockRejectedValue(original);
+            (mockPage as { isClosed?: () => boolean }).isClosed = () => true;
+
+            const healer = new AutoHealer(mockPage as Page, 'test-key', 'gemini');
+
+            await expect(healer.click('#gone')).rejects.toBe(original);
+            expect(mockGeminiGenerateContent).not.toHaveBeenCalled();
+        });
+
+        it('healAll reports the original error without healing when the selector still resolves', async () => {
+            setOriginalCount(() => Promise.resolve(1));
+            (mockPage.click as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('Element is not enabled'));
+
+            const healer = new AutoHealer(mockPage as Page, 'test-key', 'gemini');
+            const results = await healer.healAll([{ selectorOrKey: 'app.btn', action: 'click' }]);
+
+            expect(results[0]).toEqual({
+                selectorOrKey: 'app.btn',
+                success: false,
+                error: 'Error: Element is not enabled',
+            });
+            expect(mockGeminiGenerateContent).not.toHaveBeenCalled();
+            expect(mockLocatorManager.recordSelectorFailure).not.toHaveBeenCalled();
         });
     });
 
