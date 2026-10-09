@@ -9,6 +9,34 @@ export interface AICallResult {
     tokensUsed?: { prompt: number; completion: number; total: number };
 }
 
+/** The slice of a Gemini SDK response that {@link extractGeminiAnswer} reads. */
+interface GeminiResponseLike {
+    text(): string;
+    candidates?: { content?: { parts?: { text?: string; thought?: boolean }[] } }[];
+}
+
+/**
+ * Return only the answer text of a Gemini response, without the model's reasoning.
+ *
+ * Thinking models (e.g. Gemma 4) return their reasoning as parts flagged
+ * `thought: true` ahead of the answer part. The SDK's `text()` predates that flag
+ * and concatenates every part with no separator, so the reply reached the parser
+ * as a chain-of-thought essay with the real selector list glued onto its last
+ * line — and the parser picked a candidate out of the reasoning instead.
+ *
+ * Falls back to `text()` only when the response carries no parts, which also
+ * keeps its error for blocked responses.
+ */
+export function extractGeminiAnswer(response: GeminiResponseLike): string {
+    const parts = response.candidates?.[0]?.content?.parts;
+    if (!parts?.length) return response.text();
+    // All-thought replies yield '' (no answer), not the reasoning via text().
+    return parts
+        .filter(part => part.thought !== true)
+        .map(part => part.text ?? '')
+        .join('');
+}
+
 /**
  * System instruction that constrains the model to emit a bare selector.
  *
@@ -198,7 +226,7 @@ export class AIClientManager {
             timeout,
             'Gemini'
         );
-        const raw = response.response.text().trim();
+        const raw = extractGeminiAnswer(response.response).trim();
         const usageMetadata = response.response.usageMetadata;
         const tokensUsed = usageMetadata
             ? {
