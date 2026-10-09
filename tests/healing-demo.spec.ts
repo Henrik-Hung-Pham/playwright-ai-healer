@@ -1,4 +1,4 @@
-import { test, expect } from './fixtures/base.js';
+import { test, expect, skipIfRateLimited } from './fixtures/base.js';
 import { config } from '../src/config/index.js';
 
 /**
@@ -18,9 +18,12 @@ test.describe('Self-Healing Demo', () => {
 
         // Intentionally use a BROKEN selector with the POM's "safeClick" function
         // This demonstrates that POM functions are now self-healing!
-        await booksPage.safeClick('#nonexistent-book-card-xyz-12345', {
-            timeout: config.test.timeouts.short,
-        });
+        // A 429 from the provider skips rather than fails: no heal was attempted.
+        await skipIfRateLimited(autoHealer, () =>
+            booksPage.safeClick('#nonexistent-book-card-xyz-12345', {
+                timeout: config.test.timeouts.short,
+            })
+        );
 
         // Verify the healing events were recorded
         const events = autoHealer!.getHealingEvents();
