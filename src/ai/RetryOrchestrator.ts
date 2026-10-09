@@ -8,6 +8,25 @@ import type { AIError } from '../types.js';
 export type ErrorAction = 'retry' | 'rotate_key' | 'switch_provider' | 'fatal';
 
 /**
+ * Is this a rate-limit / quota rejection (HTTP 429 or its textual equivalents)?
+ *
+ * Kept separate from {@link RetryOrchestrator.classifyError}, which folds 429
+ * into every other 4xx: callers that report on a heal need to tell "the provider
+ * refused to answer" apart from "the provider answered and healing still failed".
+ */
+export function isRateLimitError(error: AIError): boolean {
+    const msg = (error.message ?? '').toLowerCase();
+    return (
+        error.status === 429 ||
+        /\b429\b/.test(msg) ||
+        msg.includes('rate limit') ||
+        msg.includes('resource exhausted') ||
+        msg.includes('exceeded your current quota') ||
+        msg.includes('insufficient quota')
+    );
+}
+
+/**
  * Options for configuring the retry orchestrator.
  */
 export interface RetryOptions {
@@ -78,11 +97,7 @@ export class RetryOrchestrator {
 
         // Other 4xx (rate limit, quota, etc.) → switch provider
         const is4xxError =
-            (error.status !== undefined && error.status >= 400 && error.status < 500) ||
-            /\b429\b/.test(msg) ||
-            msg.includes('rate limit') ||
-            msg.includes('resource exhausted') ||
-            msg.includes('insufficient quota');
+            (error.status !== undefined && error.status >= 400 && error.status < 500) || isRateLimitError(error);
 
         if (is4xxError) return 'switch_provider';
 
