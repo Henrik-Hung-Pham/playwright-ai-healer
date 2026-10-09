@@ -131,6 +131,56 @@ describe('HealingEngine', () => {
         expect(result?.reasoning).toMatch(/id selector/);
     });
 
+    describe('when the model echoes the original selector', () => {
+        /**
+         * A reply identical to the failing selector is never a repair — it is the
+         * model restating the problem, which reasoning models do routinely.
+         *
+         * The uniqueness gate alone does not catch this. It only rejects an echo
+         * when the original resolves to zero elements; a selector that failed for
+         * any other reason (overlay, detached node, strict-mode ambiguity) still
+         * resolves, so the echo would score normally and be retried — and
+         * persisted — as if it were a fix.
+         */
+        it('rejects it even though it resolves to exactly one element', async () => {
+            mockParseAIResponse.mockReturnValue('#obscured-btn');
+            page = makeMockPage(1);
+
+            const result = await engine.heal(page, '#obscured-btn', new Error('intercepted by overlay'));
+
+            expect(result).toBeNull();
+        });
+
+        it('ignores surrounding whitespace when comparing', async () => {
+            mockParseAIResponse.mockReturnValue('  #obscured-btn  ');
+            page = makeMockPage(1);
+
+            const result = await engine.heal(page, '#obscured-btn', new Error('intercepted by overlay'));
+
+            expect(result).toBeNull();
+        });
+
+        it('records the attempt as a failed healing event', async () => {
+            mockParseAIResponse.mockReturnValue('#obscured-btn');
+            page = makeMockPage(1);
+
+            await engine.heal(page, '#obscured-btn', new Error('intercepted by overlay'));
+
+            const event = engine.getHealingEvents().at(-1);
+            expect(event?.success).toBe(false);
+            expect(event?.result).toBeNull();
+        });
+
+        it('still accepts a genuinely different selector', async () => {
+            mockParseAIResponse.mockReturnValue('#replacement-btn');
+            page = makeMockPage(1);
+
+            const result = await engine.heal(page, '#obscured-btn', new Error('intercepted by overlay'));
+
+            expect(result?.selector).toBe('#replacement-btn');
+        });
+    });
+
     it('rejects a low-confidence ambiguous selector below the threshold', async () => {
         // A class selector matching many elements scores 0.6 < 0.7 threshold.
         mockParseAIResponse.mockReturnValue('.product_pod');

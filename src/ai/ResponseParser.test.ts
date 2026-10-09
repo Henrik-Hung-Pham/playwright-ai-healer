@@ -135,4 +135,53 @@ describe('ResponseParser', () => {
             expect(parseAIResponse(prose)).toBe('Please check the page manually.');
         });
     });
+
+    describe('FAIL verdict after chain-of-thought', () => {
+        /**
+         * Regression: the candidate pools scan the whole response, so a selector
+         * quoted while *reasoning* outranked an explicit refusal stated at the
+         * end. Models quote the original broken selector when restating the
+         * problem, so the parser answered with the very selector that failed.
+         *
+         * Captured verbatim from gemma-4-31b-it during a healing-benchmark run.
+         */
+        it('honours a trailing FAIL over a selector echoed in the reasoning', () => {
+            const verbose = [
+                '*   Original Selector: `#site-search` (indicates a search input or search button).',
+                '*   Error: Timeout (element not found).',
+                '*   The HTML contains only one element: `<button type="button" id="retry">Retry</button>`.',
+                '*   Is there any element that looks like a search field? No.',
+                '*   Since no element fits the purpose of "site-search", I must return "FAIL".FAIL',
+            ].join('\n');
+
+            expect(parseAIResponse(verbose)).toBeNull();
+        });
+
+        it.each([
+            ['bare token on its own line', 'Reasoning about the page.\nFAIL'],
+            ['quoted and punctuated', 'No suitable element exists.\nAnswer: "FAIL".'],
+            ['markdown-emphasised', 'Nothing matches the intent.\n**FAIL**'],
+            ['trailing whitespace', 'Considered every candidate.\nFAIL   '],
+        ])('treats a trailing refusal as no answer — %s', (_label, raw) => {
+            expect(parseAIResponse(raw)).toBeNull();
+        });
+
+        it.each([
+            ['class ending in the token', '.badge.FAIL'],
+            ['attribute value', '[data-status="FAIL"]'],
+            ['id ending in the token', '#status-FAIL'],
+        ])('does not mistake a real selector for a refusal — %s', (_label, selector) => {
+            expect(parseAIResponse(selector)).toBe(selector);
+        });
+
+        it('still returns a selector when the refusal is only discussed, not concluded', () => {
+            const verbose = [
+                '*   Constraint: return "FAIL" if no match is found.',
+                '*   A match does exist, so FAIL does not apply here.',
+                '`#place-order-btn`',
+            ].join('\n');
+
+            expect(parseAIResponse(verbose)).toBe('#place-order-btn');
+        });
+    });
 });
