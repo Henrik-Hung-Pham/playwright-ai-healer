@@ -1,0 +1,12 @@
+{
+    "$schema": "https://typedoc.org/schema.json",
+    "entryPoints": ["src/index.ts"],
+    "out": "docs",
+    "name": "self-healing-agent",
+    "readme": "README.md",
+    "excludePrivate": true,
+    "excludeInternal": true,
+    "categorizeByGroup": true,
+    "treatWarningsAsErrors": true,
+    "highlightLanguages": ["typescript", "javascript", "json", "bash", "sql", "mermaid", "html", "css"]
+}
