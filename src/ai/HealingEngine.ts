@@ -293,15 +293,26 @@ export class HealingEngine {
             let rawResult: string | undefined;
             let sawRateLimit = false;
             try {
-                // Watch every attempt, not just the error that escapes: after a 429
-                // the orchestrator fails over, and the error it finally throws may
-                // come from the fallback (e.g. a 401 on an unconfigured provider)
-                // even though the root cause was the rate limit.
-                const { result: aiResult } = await orchestrator.execute(() =>
-                    this.clientManager.makeRequest(promptText, config.test.timeouts.default).catch((err: unknown) => {
-                        if (isRateLimitError(err as AIError)) sawRateLimit = true;
-                        throw err;
-                    })
+                // The budget bounds the heal as a whole; each request's own timeout is
+                // capped to what is left of it, so a slow final attempt cannot run on
+                // past the budget and into the test timeout. Watch every attempt, not
+                // just the error that escapes: after a 429 the orchestrator fails over,
+                // and the error it finally throws may come from the fallback (e.g. a
+                // 401 on an unconfigured provider) even though the root cause was the
+                // rate limit.
+                const { result: aiResult } = await orchestrator.execute(
+                    remainingMs =>
+                        this.clientManager
+                            .makeRequest(promptText, Math.min(config.test.timeouts.default, remainingMs))
+                            .catch((err: unknown) => {
+                                if (isRateLimitError(err as AIError)) sawRateLimit = true;
+                                throw err;
+                            }),
+                    {
+                        maxRetries: config.ai.healing.maxRetries,
+                        baseDelayMs: config.ai.healing.retryDelay,
+                        budgetMs: config.ai.healing.budgetMs,
+                    }
                 );
                 rawResult = aiResult.raw;
                 tokensUsed = aiResult.tokensUsed;

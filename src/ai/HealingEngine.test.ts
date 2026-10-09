@@ -37,7 +37,13 @@ vi.mock('../utils/Logger.js', () => ({
 vi.mock('../config/index.js', () => ({
     config: {
         ai: {
-            healing: { domSnapshotCharLimit: 2000, confidenceThreshold: 0.7, maxRetries: 3, retryDelay: 100 },
+            healing: {
+                domSnapshotCharLimit: 2000,
+                confidenceThreshold: 0.7,
+                maxRetries: 3,
+                retryDelay: 100,
+                budgetMs: 3000,
+            },
             prompts: { healingPrompt: (_s: string, _e: string, _h: string) => 'mock-prompt' },
         },
         test: { timeouts: { default: 5000 } },
@@ -330,6 +336,16 @@ describe('HealingEngine', () => {
         expect(result).toBeNull();
         // Should have attempted multiple retries
         expect(vi.mocked(clientManager.makeRequest).mock.calls.length).toBeGreaterThan(1);
+    });
+
+    it('caps the per-request timeout at the remaining healing budget', async () => {
+        await engine.heal(page, '#selector', new Error('not found'));
+
+        // test.timeouts.default is 5000 but the healing budget is 3000, so the
+        // request must not be allowed to outlive the budget.
+        const timeout = vi.mocked(clientManager.makeRequest).mock.calls[0]?.[1];
+        expect(timeout).toBeLessThanOrEqual(3000);
+        expect(timeout).toBeGreaterThan(2000);
     });
 
     it('returns null on 4xx error when no alternate provider is available', async () => {

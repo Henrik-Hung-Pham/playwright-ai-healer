@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { RetryOrchestrator, isRateLimitError } from './RetryOrchestrator.js';
+import { RetryOrchestrator, RetryBudgetExceededError, backoffDelay, isRateLimitError } from './RetryOrchestrator.js';
 import type { AIClientManager } from './AIClientManager.js';
 import type { AIError } from '../types.js';
 
@@ -220,6 +220,79 @@ describe('RetryOrchestrator', () => {
             const operation = vi.fn().mockRejectedValue(makeError(429, 'Rate limit'));
 
             await expect(orchestrator.execute(operation, { baseDelayMs: 1 })).rejects.toThrow('Rate limit');
+        });
+    });
+    describe('backoffDelay', () => {
+        it('stays within the upper half of the exponential ceiling', () => {
+            expect(backoffDelay(1, 1000, () => 0)).toBe(1000);
+            expect(backoffDelay(1, 1000, () => 1)).toBe(2000);
+            expect(backoffDelay(3, 1000, () => 0)).toBe(4000);
+            expect(backoffDelay(3, 1000, () => 1)).toBe(8000);
+        });
+
+        it('varies between calls so parallel workers do not retry in lockstep', () => {
+            const delays = new Set(Array.from({ length: 20 }, () => backoffDelay(2, 1000)));
+            expect(delays.size).toBeGreaterThan(1);
+        });
+    });
+
+    describe('budgetMs', () => {
+        it('passes the remaining budget to the operation', async () => {
+            const orchestrator = new RetryOrchestrator(makeMockClientManager());
+            const operation = vi.fn().mockResolvedValue('ok');
+
+            await orchestrator.execute(operation, { budgetMs: 30_000 });
+
+            const remaining = operation.mock.calls[0]?.[0] as number;
+            expect(remaining).toBeGreaterThan(29_000);
+            expect(remaining).toBeLessThanOrEqual(30_000);
+        });
+
+        it('passes Infinity when no budget is set', async () => {
+            const orchestrator = new RetryOrchestrator(makeMockClientManager());
+            const operation = vi.fn().mockResolvedValue('ok');
+
+            await orchestrator.execute(operation);
+
+            expect(operation).toHaveBeenCalledWith(Infinity);
+        });
+
+        it('gives up instead of sleeping past the budget', async () => {
+            const orchestrator = new RetryOrchestrator(makeMockClientManager());
+            const operation = vi.fn().mockRejectedValue(makeError(503, 'Service Unavailable'));
+
+            const started = Date.now();
+            // First backoff is at least 2^1 * 1000 / 2 = 1000ms, which overruns a 500ms budget.
+            await expect(
+                orchestrator.execute(operation, { maxRetries: 3, baseDelayMs: 1000, budgetMs: 500 })
+            ).rejects.toBeInstanceOf(RetryBudgetExceededError);
+
+            expect(operation).toHaveBeenCalledTimes(1);
+            expect(Date.now() - started).toBeLessThan(500);
+        });
+
+        it('does not start another attempt once the budget is spent', async () => {
+            vi.useFakeTimers();
+            try {
+                const client = makeMockClientManager({
+                    getKeyCount: vi.fn().mockReturnValue(10),
+                    rotateKey: vi.fn().mockReturnValue(true),
+                } as unknown as Partial<AIClientManager>);
+                const orchestrator = new RetryOrchestrator(client);
+                // Each attempt burns 400ms of wall clock before failing auth.
+                const operation = vi.fn().mockImplementation(() => {
+                    vi.advanceTimersByTime(400);
+                    return Promise.reject(makeError(401, 'Unauthorized'));
+                });
+
+                const run = orchestrator.execute(operation, { budgetMs: 1000 });
+
+                await expect(run).rejects.toThrow(/budget of 1000ms exhausted.*Unauthorized/);
+                // 0ms, 400ms, 800ms start; the fourth would start at 1200ms.
+                expect(operation).toHaveBeenCalledTimes(3);
+            } finally {
+                vi.useRealTimers();
+            }
         });
     });
 });

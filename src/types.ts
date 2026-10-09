@@ -201,8 +201,10 @@ export interface AIConfig {
     healing: {
         /** Maximum number of AI retry attempts per healing event. */
         maxRetries: number;
-        /** Delay in milliseconds between retry attempts. */
+        /** Base unit in milliseconds for exponential retry backoff. */
         retryDelay: number;
+        /** Wall-clock budget in milliseconds for all AI attempts within one heal. */
+        budgetMs: number;
         /** Minimum confidence score (0–1) required to accept an AI-suggested selector. */
         confidenceThreshold: number;
         /** Maximum character length of the DOM snapshot sent to the AI provider. */
