@@ -76,4 +76,24 @@ export const test = base.extend<MyFixtures, MyWorkerFixtures>({
     },
 });
 
+/**
+ * Run a step that depends on a live AI heal, skipping the test — rather than
+ * failing it — when the heal failed because the provider rate-limited the
+ * request (HTTP 429 / quota exhausted).
+ *
+ * A 429 means the provider never answered, so the test learned nothing about
+ * healing; failing it would turn the pipeline red over shared-key quota rather
+ * than a regression. Every other failure (wrong selector, 5xx, timeouts) is
+ * rethrown unchanged.
+ */
+export async function skipIfRateLimited(autoHealer: AutoHealer | undefined, step: () => Promise<void>): Promise<void> {
+    try {
+        await step();
+    } catch (error) {
+        const rateLimited = autoHealer?.getHealingEvents().some(e => e.rateLimited) ?? false;
+        test.skip(rateLimited, 'AI provider rate-limited the heal request (429) — healing could not be exercised');
+        throw error;
+    }
+}
+
 export { expect } from '@playwright/test';
