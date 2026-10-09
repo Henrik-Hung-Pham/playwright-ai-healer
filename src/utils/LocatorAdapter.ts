@@ -134,7 +134,7 @@ export class FileAdapter implements LocatorAdapter {
             let current: string | LocatorStore | undefined = this.locators;
             for (const part of parts) {
                 if (current === undefined || current === null || typeof current === 'string') return null;
-                current = current[part] as string | LocatorStore;
+                current = current[part];
             }
             return typeof current === 'string' ? current : null;
         } catch {

@@ -25,12 +25,17 @@
         "exactOptionalPropertyTypes": true,
 
         // Style Options
-        // "noImplicitReturns": true,
-        // "noImplicitOverride": true,
-        // "noUnusedLocals": true,
-        // "noUnusedParameters": true,
+        "noImplicitReturns": true,
+        "noImplicitOverride": true,
+        "noUnusedLocals": true,
+        "noUnusedParameters": true,
+        // Off deliberately: RetryOrchestrator falls through from key rotation to
+        // provider switch on purpose, and ESLint's no-fallthrough already demands
+        // an explicit comment for every intentional case.
         // "noFallthroughCasesInSwitch": true,
-        // "noPropertyAccessFromIndexSignature": true,
+        // Enforces the bracket-notation convention for index signatures such as
+        // process.env['VAR'] (see CLAUDE.md) at compile time instead of review.
+        "noPropertyAccessFromIndexSignature": true,
 
         // Recommended Options
         "strict": true,
