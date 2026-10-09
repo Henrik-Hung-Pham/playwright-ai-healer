@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { RetryOrchestrator, RetryBudgetExceededError, backoffDelay } from './RetryOrchestrator.js';
+import { RetryOrchestrator, RetryBudgetExceededError, backoffDelay, isRateLimitError } from './RetryOrchestrator.js';
 import type { AIClientManager } from './AIClientManager.js';
 import type { AIError } from '../types.js';
 
@@ -21,6 +21,27 @@ function makeMockClientManager(overrides: Partial<AIClientManager> = {}) {
         ...overrides,
     } as unknown as AIClientManager;
 }
+
+describe('isRateLimitError', () => {
+    it.each([
+        [429, 'Too Many Requests'],
+        [undefined, '[429 Too Many Requests] You exceeded your current quota'],
+        [undefined, 'Rate limit exceeded'],
+        [undefined, 'RESOURCE EXHAUSTED'],
+        [undefined, 'insufficient quota'],
+    ])('detects status=%s msg=%s', (status, msg) => {
+        expect(isRateLimitError(makeError(status, msg))).toBe(true);
+    });
+
+    it.each([
+        [500, 'Internal Server Error'],
+        [401, 'Unauthorized'],
+        [400, 'Bad Request'],
+        [undefined, 'request timed out'],
+    ])('rejects status=%s msg=%s', (status, msg) => {
+        expect(isRateLimitError(makeError(status, msg))).toBe(false);
+    });
+});
 
 describe('RetryOrchestrator', () => {
     describe('classifyError', () => {

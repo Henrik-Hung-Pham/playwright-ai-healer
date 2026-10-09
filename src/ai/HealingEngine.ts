@@ -7,8 +7,8 @@ import { parseAIResponse, parseAICandidates } from './ResponseParser.js';
 import { captureFingerprint, compareFingerprints, type ElementFingerprint } from './ElementFingerprint.js';
 import { validateSelector } from './SelectorValidator.js';
 import { scoreSelector } from './SelectorScorer.js';
-import { RetryOrchestrator } from './RetryOrchestrator.js';
-import type { HealingResult, HealingEvent } from '../types.js';
+import { RetryOrchestrator, isRateLimitError } from './RetryOrchestrator.js';
+import type { AIError, HealingResult, HealingEvent } from '../types.js';
 import { CircuitBreaker } from '../utils/CircuitBreaker.js';
 import { HealingMetrics } from '../utils/HealingMetrics.js';
 
@@ -227,6 +227,7 @@ export class HealingEngine {
         // Declared outside the try so the `finally` block can always report the
         // snapshot size, including on the paths that never got one.
         let htmlSnapshot = '';
+        let rateLimited = false;
 
         try {
             // 1. Capture simplified DOM — ONCE, before the retry loop.
@@ -290,13 +291,23 @@ export class HealingEngine {
             }
 
             let rawResult: string | undefined;
+            let sawRateLimit = false;
             try {
                 // The budget bounds the heal as a whole; each request's own timeout is
                 // capped to what is left of it, so a slow final attempt cannot run on
-                // past the budget and into the test timeout.
+                // past the budget and into the test timeout. Watch every attempt, not
+                // just the error that escapes: after a 429 the orchestrator fails over,
+                // and the error it finally throws may come from the fallback (e.g. a
+                // 401 on an unconfigured provider) even though the root cause was the
+                // rate limit.
                 const { result: aiResult } = await orchestrator.execute(
                     remainingMs =>
-                        this.clientManager.makeRequest(promptText, Math.min(config.test.timeouts.default, remainingMs)),
+                        this.clientManager
+                            .makeRequest(promptText, Math.min(config.test.timeouts.default, remainingMs))
+                            .catch((err: unknown) => {
+                                if (isRateLimitError(err as AIError)) sawRateLimit = true;
+                                throw err;
+                            }),
                     {
                         maxRetries: config.ai.healing.maxRetries,
                         baseDelayMs: config.ai.healing.retryDelay,
@@ -308,7 +319,10 @@ export class HealingEngine {
                 logger.info(`[HealingEngine:heal] ✅ AI request succeeded.`);
                 this.getCircuitBreaker(this.clientManager.getProvider()).onSuccess();
             } catch {
-                logger.error(`[HealingEngine:heal] ❌ All retry strategies exhausted.`);
+                rateLimited = sawRateLimit;
+                logger.error(
+                    `[HealingEngine:heal] ❌ All retry strategies exhausted${rateLimited ? ' (rate-limited)' : ''}.`
+                );
                 this.getCircuitBreaker(this.clientManager.getProvider()).onFailure();
                 return null;
             }
@@ -373,6 +387,7 @@ export class HealingEngine {
                 durationMs,
                 ...(tokensUsed ? { tokensUsed } : {}),
                 domSnapshotLength: htmlSnapshot.length,
+                ...(rateLimited ? { rateLimited } : {}),
             };
             this.healingEvents.push(healingEvent);
             if (this.healingEvents.length > HealingEngine.MAX_HEALING_EVENTS) {
