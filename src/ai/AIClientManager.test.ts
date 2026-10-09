@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mockGeminiGenerateContent, mockOpenaiCreate } from '../test-setup.js';
-import { AIClientManager } from './AIClientManager.js';
+import { AIClientManager, extractGeminiAnswer } from './AIClientManager.js';
 
 describe('AIClientManager', () => {
     beforeEach(() => {
@@ -210,5 +210,28 @@ describe('AIClientManager', () => {
             expect(result.raw).toBe('#healed');
             expect(result.tokensUsed).toBeUndefined();
         });
+    });
+});
+
+describe('extractGeminiAnswer', () => {
+    const response = (parts?: { text?: string; thought?: boolean }[]) => ({
+        text: () => (parts ?? []).map(p => p.text ?? '').join('') || 'from-text',
+        ...(parts ? { candidates: [{ content: { parts } }] } : {}),
+    });
+
+    it('drops thought parts and keeps only the answer', () => {
+        const r = response([
+            { text: 'Candidate 4: article:has-text(...)', thought: true },
+            { text: 'article >> nth=0\nol > li > article' },
+        ]);
+        expect(extractGeminiAnswer(r)).toBe('article >> nth=0\nol > li > article');
+    });
+
+    it('returns an empty answer when every part is a thought', () => {
+        expect(extractGeminiAnswer(response([{ text: 'thinking…', thought: true }]))).toBe('');
+    });
+
+    it('falls back to text() when the response has no parts', () => {
+        expect(extractGeminiAnswer(response())).toBe('from-text');
     });
 });
