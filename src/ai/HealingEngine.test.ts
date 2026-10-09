@@ -392,6 +392,36 @@ describe('HealingEngine', () => {
         expect(result).toBeNull();
     });
 
+    it('marks the event rateLimited when the request ends in a 429', async () => {
+        const quotaError = Object.assign(new Error('You exceeded your current quota'), { status: 429 });
+        vi.mocked(clientManager.makeRequest).mockRejectedValue(quotaError);
+        vi.mocked(clientManager.switchProvider).mockReturnValue(false);
+
+        await engine.heal(page, '#selector', new Error('not found'));
+
+        expect(engine.getHealingEvents()[0]?.rateLimited).toBe(true);
+    });
+
+    it('marks the event rateLimited when a 429 fails over to a provider that also fails', async () => {
+        const quotaError = Object.assign(new Error('Too Many Requests'), { status: 429 });
+        const authError = Object.assign(new Error('Incorrect API key'), { status: 401 });
+        vi.mocked(clientManager.makeRequest).mockRejectedValueOnce(quotaError).mockRejectedValue(authError);
+        vi.mocked(clientManager.switchProvider).mockReturnValue(true);
+        vi.mocked(clientManager.rotateKey).mockReturnValue(false);
+
+        await engine.heal(page, '#selector', new Error('not found'));
+
+        expect(engine.getHealingEvents()[0]?.rateLimited).toBe(true);
+    });
+
+    it('does not mark the event rateLimited for other request failures', async () => {
+        vi.mocked(clientManager.makeRequest).mockRejectedValue(new Error('fatal: bad request'));
+
+        await engine.heal(page, '#selector', new Error('not found'));
+
+        expect(engine.getHealingEvents()[0]).not.toHaveProperty('rateLimited');
+    });
+
     it('rotates to the next API key on 401 auth error', async () => {
         const authError = Object.assign(new Error('Unauthorized'), { status: 401 });
         vi.mocked(clientManager.makeRequest).mockRejectedValueOnce(authError).mockResolvedValueOnce({ raw: '#healed' });
