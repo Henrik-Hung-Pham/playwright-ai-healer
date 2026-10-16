@@ -1,0 +1,31 @@
+# Keeps pinned dependencies moving. Actions in .github/workflows are pinned to
+# full commit SHAs, since a tag like `@v6` can be moved to different code at any
+# time. Dependabot understands the `# vX.Y.Z` comment next to each SHA and bumps
+# SHA and comment together.
+version: 2
+updates:
+    - package-ecosystem: github-actions
+      directory: /
+      schedule:
+          interval: weekly
+      groups:
+          # One PR per week for all action bumps instead of one per action.
+          github-actions:
+              patterns: ['*']
+      commit-message:
+          prefix: ci
+
+    - package-ecosystem: npm
+      directory: /
+      schedule:
+          interval: weekly
+      open-pull-requests-limit: 10
+      groups:
+          # Minor/patch dev tooling is low-risk and noisy on its own. Majors and
+          # runtime dependencies still get their own PRs so they are reviewed.
+          dev-dependencies:
+              dependency-type: development
+              update-types: [minor, patch]
+      commit-message:
+          prefix: fix(deps)
+          prefix-development: chore(deps)

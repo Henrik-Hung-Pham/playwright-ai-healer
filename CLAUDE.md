@@ -126,6 +126,10 @@ GitHub Actions (`.github/workflows/playwright.yml`) runs on push/PR to `main`:
 3. Uploads HTML reports as artifacts
    Uses `npm ci` (not `npm install`) and requires `GEMINI_API_KEY` secret.
 
+Every `uses:` is pinned to a full commit SHA with a `# vX.Y.Z` comment. Never pin to a tag like
+`@v6`: tags are mutable. Dependabot (`.github/dependabot.yml`) bumps the SHA and the comment
+together in a weekly grouped PR, and also raises npm updates.
+
 A second workflow (`.github/workflows/audit.yml`, **Dependency Audit**) runs
 `npm audit --audit-level=high` on the nightly schedule, on manual
 `workflow_dispatch`, and on PRs that touch `package.json` / `package-lock.json` —
