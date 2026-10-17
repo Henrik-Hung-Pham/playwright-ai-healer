@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { loadEnvironment } from '../utils/Environment.js';
 import { logger } from '../utils/Logger.js';
 import { buildHealingPrompt } from '../ai/HealingPrompt.js';
-import type { AIProvider } from '../types.js';
+import type { AIProvider, HealingMode } from '../types.js';
 
 const categoriesData = {
     travel: { label: 'Travel' },
@@ -52,6 +52,9 @@ const envSchema = z.object({
         .transform(val => val !== 'false'),
     LOCATOR_STORE: z.enum(['file', 'sqlite']).default('file'),
     HEALING_FAILURE_MODE: z.enum(['fail', 'skip']).default('fail'),
+    // Defaults to 'apply' so existing setups are unchanged. See the HealingMode
+    // docs in types.ts for why 'suggest' is the safer choice in CI.
+    HEALING_MODE: z.enum(['off', 'suggest', 'apply']).default('apply'),
     // Consecutive post-heal failures tolerated before a healed selector is rolled
     // back to the value it replaced. 1 would revert on the first flake; the default
     // of 3 requires a consistent pattern before discarding a heal.
@@ -69,6 +72,7 @@ type AppConfig = {
         gemini: { apiKey: string | undefined; modelName: string };
         openai: { apiKeys: string[]; modelName: string; apiKey: string | undefined };
         healing: {
+            mode: HealingMode;
             maxRetries: number;
             retryDelay: number;
             confidenceThreshold: number;
@@ -108,12 +112,25 @@ function buildConfig(): AppConfig {
 
     const env = envSchema.parse(process.env);
 
-    // Validate that the selected provider has a key
-    if (env.AI_PROVIDER === 'gemini' && !env.GEMINI_API_KEY) {
-        throw new Error('GEMINI_API_KEY is required when AI_PROVIDER is gemini');
-    }
-    if (env.AI_PROVIDER === 'openai' && !env.OPENAI_API_KEY && !env.OPENAI_API_KEYS) {
-        throw new Error('OPENAI_API_KEY or OPENAI_API_KEYS is required when AI_PROVIDER is openai');
+    // Validate that the selected provider has a key.
+    //
+    // Skipped entirely when HEALING_MODE=off: with healing disabled no request is
+    // ever made, so demanding a credential would make the kill switch unusable —
+    // which is exactly the state this mode exists to fix. Both 'suggest' and
+    // 'apply' call the provider and so still require a key.
+    if (env.HEALING_MODE !== 'off') {
+        if (env.AI_PROVIDER === 'gemini' && !env.GEMINI_API_KEY) {
+            throw new Error(
+                'GEMINI_API_KEY is required when AI_PROVIDER is gemini. ' +
+                    'Set HEALING_MODE=off to run the suite without healing.'
+            );
+        }
+        if (env.AI_PROVIDER === 'openai' && !env.OPENAI_API_KEY && !env.OPENAI_API_KEYS) {
+            throw new Error(
+                'OPENAI_API_KEY or OPENAI_API_KEYS is required when AI_PROVIDER is openai. ' +
+                    'Set HEALING_MODE=off to run the suite without healing.'
+            );
+        }
     }
 
     return {
@@ -136,6 +153,7 @@ function buildConfig(): AppConfig {
                 apiKey: env.OPENAI_API_KEY,
             },
             healing: {
+                mode: env.HEALING_MODE,
                 maxRetries: 3,
                 retryDelay: 5000,
                 confidenceThreshold: 0.7,
