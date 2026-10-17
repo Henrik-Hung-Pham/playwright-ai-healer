@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { RetryOrchestrator, isRateLimitError } from './RetryOrchestrator.js';
+import { RetryOrchestrator, isRateLimitError, isServerError } from './RetryOrchestrator.js';
 import type { AIClientManager } from './AIClientManager.js';
 import type { AIError } from '../types.js';
 
@@ -40,6 +40,28 @@ describe('isRateLimitError', () => {
         [undefined, 'request timed out'],
     ])('rejects status=%s msg=%s', (status, msg) => {
         expect(isRateLimitError(makeError(status, msg))).toBe(false);
+    });
+});
+
+describe('isServerError', () => {
+    it.each([
+        [500, 'Internal error encountered'],
+        [503, 'This model is currently experiencing high demand'],
+        [undefined, '[503 Service Unavailable]'],
+        [undefined, 'model is overloaded'],
+        [undefined, 'Bad Gateway'],
+        [undefined, '[AutoHealer] Gemini API request timed out after 60s'],
+    ])('detects status=%s msg=%s', (status, msg) => {
+        expect(isServerError(makeError(status, msg))).toBe(true);
+    });
+
+    it.each([
+        [429, 'Too Many Requests'],
+        [401, 'Unauthorized'],
+        [400, 'Bad Request'],
+        [undefined, 'fatal: bad request'],
+    ])('rejects status=%s msg=%s', (status, msg) => {
+        expect(isServerError(makeError(status, msg))).toBe(false);
     });
 });
 
@@ -140,7 +162,7 @@ describe('RetryOrchestrator', () => {
         it('should rotate key on 401 and retry', async () => {
             const client = makeMockClientManager({
                 rotateKey: vi.fn().mockReturnValue(true),
-            } as unknown as Partial<AIClientManager>);
+            });
             const orchestrator = new RetryOrchestrator(client);
 
             const operation = vi
@@ -158,7 +180,7 @@ describe('RetryOrchestrator', () => {
             const client = makeMockClientManager({
                 switchProvider: vi.fn().mockReturnValue(true),
                 getKeyCount: vi.fn().mockReturnValue(1),
-            } as unknown as Partial<AIClientManager>);
+            });
             const orchestrator = new RetryOrchestrator(client);
 
             const operation = vi
@@ -191,7 +213,7 @@ describe('RetryOrchestrator', () => {
                 rotateKey: vi.fn().mockReturnValue(false), // no more keys
                 switchProvider: vi.fn().mockReturnValue(true),
                 getKeyCount: vi.fn().mockReturnValue(1),
-            } as unknown as Partial<AIClientManager>);
+            });
             const orchestrator = new RetryOrchestrator(client);
 
             const operation = vi
@@ -214,7 +236,7 @@ describe('RetryOrchestrator', () => {
                 rotateKey: vi.fn().mockReturnValue(false),
                 switchProvider: vi.fn().mockReturnValue(false),
                 getKeyCount: vi.fn().mockReturnValue(1),
-            } as unknown as Partial<AIClientManager>);
+            });
             const orchestrator = new RetryOrchestrator(client);
 
             const operation = vi.fn().mockRejectedValue(makeError(429, 'Rate limit'));

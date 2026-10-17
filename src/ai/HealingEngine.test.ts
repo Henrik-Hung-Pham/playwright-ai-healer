@@ -176,6 +176,14 @@ describe('HealingEngine', () => {
             expect(clientManager.makeRequest).not.toHaveBeenCalled();
         });
 
+        it('marks a fast-failed heal providerUnavailable', async () => {
+            tripBreaker('gemini');
+
+            await engine.heal(page, '#old-btn', new Error('not found'));
+
+            expect(engine.getHealingEvents()[0]?.providerUnavailable).toBe(true);
+        });
+
         it('does not fast-fail a provider whose breaker is still closed', async () => {
             tripBreaker('openai');
 
@@ -370,6 +378,45 @@ describe('HealingEngine', () => {
         await engine.heal(page, '#selector', new Error('not found'));
 
         expect(engine.getHealingEvents()[0]).not.toHaveProperty('rateLimited');
+    });
+
+    it.each([
+        ['a 500', Object.assign(new Error('Internal error encountered'), { status: 500 })],
+        ['a 503', Object.assign(new Error('This model is currently experiencing high demand'), { status: 503 })],
+        ['a timeout', new Error('[AutoHealer] Gemini API request timed out after 60s')],
+    ])('marks the event providerUnavailable when %s survives every retry', async (_label, outage) => {
+        vi.useFakeTimers();
+        vi.mocked(clientManager.makeRequest).mockRejectedValue(outage);
+
+        const healPromise = engine.heal(page, '#selector', new Error('not found'));
+        await vi.runAllTimersAsync();
+        await healPromise;
+        vi.useRealTimers();
+
+        const event = engine.getHealingEvents()[0];
+        expect(event?.providerUnavailable).toBe(true);
+        expect(event).not.toHaveProperty('rateLimited');
+    });
+
+    it('does not mark the event providerUnavailable when an outage recovers', async () => {
+        vi.useFakeTimers();
+        const outage = Object.assign(new Error('Service Unavailable'), { status: 503 });
+        vi.mocked(clientManager.makeRequest).mockRejectedValueOnce(outage).mockResolvedValueOnce({ raw: '#healed' });
+
+        const healPromise = engine.heal(page, '#selector', new Error('not found'));
+        await vi.runAllTimersAsync();
+        await healPromise;
+        vi.useRealTimers();
+
+        expect(engine.getHealingEvents()[0]).not.toHaveProperty('providerUnavailable');
+    });
+
+    it('does not mark the event providerUnavailable for non-outage failures', async () => {
+        vi.mocked(clientManager.makeRequest).mockRejectedValue(new Error('fatal: bad request'));
+
+        await engine.heal(page, '#selector', new Error('not found'));
+
+        expect(engine.getHealingEvents()[0]).not.toHaveProperty('providerUnavailable');
     });
 
     it('rotates to the next API key on 401 auth error', async () => {

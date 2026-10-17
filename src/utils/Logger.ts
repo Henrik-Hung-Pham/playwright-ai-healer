@@ -21,7 +21,7 @@ const consoleFormat = winston.format.combine(
     winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
     winston.format.colorize({ all: true }),
     winston.format.printf(({ timestamp, level, message }) => {
-        return `[${timestamp}] ${level}: ${message}`;
+        return `[${String(timestamp)}] ${level}: ${String(message)}`;
     })
 );
 
@@ -29,7 +29,7 @@ const consoleFormat = winston.format.combine(
 const fileFormat = winston.format.combine(
     winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
     winston.format.printf(({ timestamp, level, message }) => {
-        return `[${timestamp}] [${level.toUpperCase()}]: ${message}`;
+        return `[${String(timestamp)}] [${level.toUpperCase()}]: ${String(message)}`;
     })
 );
 
