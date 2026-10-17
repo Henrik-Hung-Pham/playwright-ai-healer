@@ -88,6 +88,8 @@ Environment is selected by `TEST_ENV` variable (`dev`/`staging`/`prod`). The con
 - `BASE_URL`, `LOG_LEVEL`, `HEADLESS`, `TEST_TIMEOUT`
 - `SELECTOR_QUARANTINE_THRESHOLD` — consecutive post-heal failures before a healed selector is
   rolled back to the value it replaced (default `3`, minimum `1`)
+- `HEALING_BUDGET_MS` — wall-clock ceiling for all AI attempts within one heal (default `60000`,
+  minimum `1000`); per-request timeouts are capped to what is left of it
 
 ### TypeScript Conventions
 
