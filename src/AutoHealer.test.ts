@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import type { Page } from '@playwright/test';
+import { test, type Page } from '@playwright/test';
 import { mockGeminiGenerateContent } from './test-setup.js';
 import { AutoHealer } from './AutoHealer.js';
 import { validateSelector } from './ai/SelectorValidator.js';
@@ -595,6 +595,73 @@ describe('AutoHealer', () => {
             expect(events.length).toBe(1);
             expect(events[0]!.originalSelector).toBe('#broken');
             expect(events[0]!.success).toBe(true);
+        });
+    });
+
+    describe('healed-selector annotation', () => {
+        let annotations: { type: string; description?: string }[];
+
+        beforeEach(() => {
+            annotations = [];
+            vi.mocked(test.info).mockReturnValue({ annotations } as unknown as ReturnType<typeof test.info>);
+        });
+
+        it('marks the test when an interaction succeeded only because of a heal', async () => {
+            (mockPage.click as ReturnType<typeof vi.fn>)
+                .mockRejectedValueOnce(new Error('Element not found'))
+                .mockResolvedValueOnce(undefined);
+
+            const healer = new AutoHealer(mockPage as Page, 'test-key', 'gemini');
+            await healer.click('app.btn');
+
+            expect(annotations).toHaveLength(1);
+            expect(annotations[0]?.type).toBe('healed-selector');
+            expect(annotations[0]?.description).toMatch(
+                /^'app\.btn' '#old-selector' → '#healed-selector' \(confidence \d\.\d{2}, strategy \w+\)$/
+            );
+        });
+
+        it('adds nothing when no heal was needed', async () => {
+            (mockPage.click as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+
+            const healer = new AutoHealer(mockPage as Page, 'test-key', 'gemini');
+            await healer.click('#existing-button');
+
+            expect(annotations).toEqual([]);
+        });
+
+        it('adds nothing when the heal did not produce a working selector', async () => {
+            (mockPage.click as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('Element not found'));
+            mockGeminiGenerateContent.mockResolvedValue({ response: { text: () => 'FAIL' } });
+
+            const healer = new AutoHealer(mockPage as Page, 'test-key', 'gemini');
+            await expect(healer.click('#broken')).rejects.toThrow();
+
+            expect(annotations.filter(a => a.type === 'healed-selector')).toEqual([]);
+        });
+
+        it('still heals when called outside a Playwright test', async () => {
+            vi.mocked(test.info).mockImplementation(() => {
+                throw new Error('test.info() can only be called while test is running');
+            });
+            (mockPage.click as ReturnType<typeof vi.fn>)
+                .mockRejectedValueOnce(new Error('Element not found'))
+                .mockResolvedValueOnce(undefined);
+
+            const healer = new AutoHealer(mockPage as Page, 'test-key', 'gemini');
+            await expect(healer.click('#broken')).resolves.toBeUndefined();
+        });
+
+        it('marks healAll operations that were healed', async () => {
+            (mockPage.click as ReturnType<typeof vi.fn>)
+                .mockRejectedValueOnce(new Error('Element not found'))
+                .mockResolvedValueOnce(undefined);
+
+            const healer = new AutoHealer(mockPage as Page, 'test-key', 'gemini');
+            await healer.healAll([{ selectorOrKey: '#broken-btn', action: 'click' }]);
+
+            expect(annotations.map(a => a.type)).toEqual(['healed-selector']);
+            expect(annotations[0]?.description).toContain("'#broken-btn' → '#healed-selector'");
         });
     });
 
