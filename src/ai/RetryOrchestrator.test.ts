@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { RetryOrchestrator, isRateLimitError } from './RetryOrchestrator.js';
+import { RetryOrchestrator, isRateLimitError, isServerError } from './RetryOrchestrator.js';
 import type { AIClientManager } from './AIClientManager.js';
 import type { AIError } from '../types.js';
 
@@ -40,6 +40,28 @@ describe('isRateLimitError', () => {
         [undefined, 'request timed out'],
     ])('rejects status=%s msg=%s', (status, msg) => {
         expect(isRateLimitError(makeError(status, msg))).toBe(false);
+    });
+});
+
+describe('isServerError', () => {
+    it.each([
+        [500, 'Internal error encountered'],
+        [503, 'This model is currently experiencing high demand'],
+        [undefined, '[503 Service Unavailable]'],
+        [undefined, 'model is overloaded'],
+        [undefined, 'Bad Gateway'],
+        [undefined, '[AutoHealer] Gemini API request timed out after 60s'],
+    ])('detects status=%s msg=%s', (status, msg) => {
+        expect(isServerError(makeError(status, msg))).toBe(true);
+    });
+
+    it.each([
+        [429, 'Too Many Requests'],
+        [401, 'Unauthorized'],
+        [400, 'Bad Request'],
+        [undefined, 'fatal: bad request'],
+    ])('rejects status=%s msg=%s', (status, msg) => {
+        expect(isServerError(makeError(status, msg))).toBe(false);
     });
 });
 
