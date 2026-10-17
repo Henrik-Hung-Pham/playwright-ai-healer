@@ -27,6 +27,26 @@ export function isRateLimitError(error: AIError): boolean {
 }
 
 /**
+ * Is this a provider-side outage (HTTP 5xx, overload, or a request timeout)?
+ *
+ * Exported for the same reason as {@link isRateLimitError}: a heal that ended
+ * here never got an answer, which callers must be able to tell apart from a
+ * heal the model answered and still got wrong.
+ */
+export function isServerError(error: AIError): boolean {
+    const msg = (error.message ?? '').toLowerCase();
+    return (
+        (error.status !== undefined && error.status >= 500) ||
+        /\b50[03]\b/.test(msg) ||
+        msg.includes('service unavailable') ||
+        msg.includes('overloaded') ||
+        msg.includes('internal server error') ||
+        msg.includes('bad gateway') ||
+        msg.includes('timed out')
+    );
+}
+
+/**
  * Options for configuring the retry orchestrator.
  */
 export interface RetryOptions {
@@ -79,16 +99,7 @@ export class RetryOrchestrator {
         const msg = (error.message ?? '').toLowerCase();
 
         // 5xx / server / timeout → retry with backoff
-        const isServerError =
-            (error.status !== undefined && error.status >= 500) ||
-            /\b50[03]\b/.test(msg) ||
-            msg.includes('service unavailable') ||
-            msg.includes('overloaded') ||
-            msg.includes('internal server error') ||
-            msg.includes('bad gateway') ||
-            msg.includes('timed out');
-
-        if (isServerError) return 'retry';
+        if (isServerError(error)) return 'retry';
 
         // 401 / unauthorized → rotate API key
         const isAuthError = error.status === 401 || /\b401\b/.test(msg) || msg.includes('unauthorized');
