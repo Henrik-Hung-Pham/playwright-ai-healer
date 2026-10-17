@@ -86,6 +86,13 @@ export interface HealingEvent {
      * then ended on a different error. Absent otherwise.
      */
     rateLimited?: boolean;
+    /**
+     * `true` when no provider returned an answer because of a provider-side
+     * outage — a 5xx, overload, or request timeout survived every retry — or
+     * because the provider's circuit breaker was already open, so no request was
+     * sent. Absent otherwise.
+     */
+    providerUnavailable?: boolean;
 }
 
 /**
