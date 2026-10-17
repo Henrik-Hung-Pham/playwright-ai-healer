@@ -7,7 +7,7 @@ import { parseAIResponse, parseAICandidates } from './ResponseParser.js';
 import { captureFingerprint, compareFingerprints, type ElementFingerprint } from './ElementFingerprint.js';
 import { validateSelector } from './SelectorValidator.js';
 import { scoreSelector } from './SelectorScorer.js';
-import { RetryOrchestrator, isRateLimitError } from './RetryOrchestrator.js';
+import { RetryOrchestrator, isRateLimitError, isServerError } from './RetryOrchestrator.js';
 import type { AIError, HealingResult, HealingEvent } from '../types.js';
 import { CircuitBreaker } from '../utils/CircuitBreaker.js';
 import { HealingMetrics } from '../utils/HealingMetrics.js';
@@ -228,6 +228,7 @@ export class HealingEngine {
         // snapshot size, including on the paths that never got one.
         let htmlSnapshot = '';
         let rateLimited = false;
+        let providerUnavailable = false;
 
         try {
             // 1. Capture simplified DOM — ONCE, before the retry loop.
@@ -287,11 +288,13 @@ export class HealingEngine {
                     `[HealingEngine:heal] ⚡ Circuit breaker OPEN for provider "${provider}" ` +
                         `(${breaker.getConsecutiveFailures()} consecutive failures). Fast-failing healing.`
                 );
+                providerUnavailable = true;
                 return null;
             }
 
             let rawResult: string | undefined;
             let sawRateLimit = false;
+            let lastError: AIError | undefined;
             try {
                 // The budget bounds the heal as a whole; each request's own timeout is
                 // capped to what is left of it, so a slow final attempt cannot run on
@@ -305,7 +308,8 @@ export class HealingEngine {
                         this.clientManager
                             .makeRequest(promptText, Math.min(config.test.timeouts.default, remainingMs))
                             .catch((err: unknown) => {
-                                if (isRateLimitError(err as AIError)) sawRateLimit = true;
+                                lastError = err as AIError;
+                                if (isRateLimitError(lastError)) sawRateLimit = true;
                                 throw err;
                             }),
                     {
@@ -320,8 +324,12 @@ export class HealingEngine {
                 this.getCircuitBreaker(this.clientManager.getProvider()).onSuccess();
             } catch {
                 rateLimited = sawRateLimit;
+                // Judged on the error that ended the heal: server errors are retried,
+                // not failed over, so a 5xx that escapes means the provider stayed down.
+                providerUnavailable = lastError !== undefined && isServerError(lastError);
                 logger.error(
-                    `[HealingEngine:heal] ❌ All retry strategies exhausted${rateLimited ? ' (rate-limited)' : ''}.`
+                    `[HealingEngine:heal] ❌ All retry strategies exhausted` +
+                        `${rateLimited ? ' (rate-limited)' : ''}${providerUnavailable ? ' (provider unavailable)' : ''}.`
                 );
                 this.getCircuitBreaker(this.clientManager.getProvider()).onFailure();
                 return null;
@@ -388,6 +396,7 @@ export class HealingEngine {
                 ...(tokensUsed ? { tokensUsed } : {}),
                 domSnapshotLength: htmlSnapshot.length,
                 ...(rateLimited ? { rateLimited } : {}),
+                ...(providerUnavailable ? { providerUnavailable } : {}),
             };
             this.healingEvents.push(healingEvent);
             if (this.healingEvents.length > HealingEngine.MAX_HEALING_EVENTS) {
