@@ -4,7 +4,13 @@ import { logger } from '../utils/Logger.js';
 import { buildHealingPrompt } from '../ai/HealingPrompt.js';
 import type { AIProvider } from '../types.js';
 
-const categoriesData = {
+/**
+ * Category slugs for the demo target site (books.toscrape.com).
+ *
+ * Exported because {@link CategoryKey} is derived from it — a `keyof typeof`
+ * alias cannot be documented (or consumed) without its source object in scope.
+ */
+export const categoriesData = {
     travel: { label: 'Travel' },
     mystery: { label: 'Mystery' },
     'historical-fiction': { label: 'Historical Fiction' },
@@ -58,7 +64,7 @@ const envSchema = z.object({
     SELECTOR_QUARANTINE_THRESHOLD: z.string().default('3').transform(Number).pipe(z.number().int().min(1)),
 });
 
-type AppConfig = {
+export type AppConfig = {
     env: string;
     app: { baseUrl: string };
     ai: {
