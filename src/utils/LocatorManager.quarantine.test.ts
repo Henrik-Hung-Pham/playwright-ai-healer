@@ -14,7 +14,7 @@ const { virtualFiles, mockConfig } = vi.hoisted(() => ({
     virtualFiles: new Map<string, string>(),
     mockConfig: {
         ai: { healing: { quarantineThreshold: 3 } },
-        locatorStore: 'file' as 'file' | 'sqlite',
+        locatorStore: 'file',
     },
 }));
 
