@@ -45,7 +45,7 @@ const createFailingPage = (): Partial<Page> => {
         fill: vi.fn(),
         evaluate: vi.fn().mockResolvedValue('<html><body><button id="new-btn">Click</button></body></html>'),
         locator: vi.fn().mockReturnValue(handle),
-    } as unknown as Partial<Page>;
+    };
 };
 
 describe('AutoHealer — HEALING_MODE', () => {
@@ -186,7 +186,7 @@ describe('AutoHealer — HEALING_MODE', () => {
                 .fn()
                 .mockRejectedValueOnce(new Error('locator.click: Timeout 5000ms exceeded'))
                 .mockResolvedValueOnce(undefined);
-            page.click = click as unknown as Page['click'];
+            page.click = click;
 
             const healer = new AutoHealer(page as Page, 'key', 'gemini');
             await healer.click('app.btn');
