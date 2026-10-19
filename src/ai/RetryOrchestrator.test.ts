@@ -305,7 +305,7 @@ describe('RetryOrchestrator', () => {
                 const client = makeMockClientManager({
                     getKeyCount: vi.fn().mockReturnValue(10),
                     rotateKey: vi.fn().mockReturnValue(true),
-                } as unknown as Partial<AIClientManager>);
+                });
                 const orchestrator = new RetryOrchestrator(client);
                 // Each attempt burns 400ms of wall clock before failing auth.
                 const operation = vi.fn().mockImplementation(() => {
