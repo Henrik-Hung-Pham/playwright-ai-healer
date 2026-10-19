@@ -78,9 +78,7 @@ describe('BasePage', () => {
 
         it('should retry a transient connection error and succeed', async () => {
             const err = new Error('page.goto: net::ERR_CONNECTION_REFUSED at http://example.com/');
-            vi.mocked(mockPage.goto!)
-                .mockRejectedValueOnce(err)
-                .mockResolvedValueOnce(null as never);
+            vi.mocked(mockPage.goto!).mockRejectedValueOnce(err).mockResolvedValueOnce(null);
 
             vi.useFakeTimers();
             try {
