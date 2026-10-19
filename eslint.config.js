@@ -4,7 +4,7 @@ import playwright from 'eslint-plugin-playwright';
 
 export default tseslint.config(
     js.configs.recommended,
-    ...tseslint.configs.recommended,
+    ...tseslint.configs.recommendedTypeChecked,
     {
         files: ['**/*.ts'],
         languageOptions: {
@@ -28,13 +28,24 @@ export default tseslint.config(
         },
     },
     {
+        // `expect(mock.method).toHaveBeenCalled()` is the standard Vitest idiom and
+        // never invokes the method, so the unbound-`this` hazard does not apply.
+        files: ['**/*.test.ts', 'src/test-setup.ts'],
+        rules: {
+            '@typescript-eslint/unbound-method': 'off',
+        },
+    },
+    {
         files: ['tests/**/*.spec.ts'],
         plugins: {
             playwright,
         },
         rules: {
             ...playwright.configs.recommended.rules,
-            'playwright/expect-expect': ['warn', { assertFunctionNames: ['expect'], assertFunctionPatterns: ['^verify'] }],
+            'playwright/expect-expect': [
+                'warn',
+                { assertFunctionNames: ['expect'], assertFunctionPatterns: ['^verify'] },
+            ],
         },
     },
     {
