@@ -426,7 +426,7 @@ export abstract class BasePage {
         const locator = this.page.locator(combinedSelector).first();
 
         if (options) {
-            await this.withSecurityCheck(() => locator.waitFor(options!));
+            await this.withSecurityCheck(() => locator.waitFor(options));
         }
 
         return locator;
