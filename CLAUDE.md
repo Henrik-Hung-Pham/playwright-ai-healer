@@ -91,6 +91,8 @@ Environment is selected by `TEST_ENV` variable (`dev`/`staging`/`prod`). The con
   heal also records a `HealProvenance` entry (previous selector, model, provider, confidence,
   strategy) in `metrics.json`, which `LocatorManager.revertLocator()` can walk back through
   manually, one heal at a time, independent of the automatic threshold above.
+- `HEALING_BUDGET_MS` — wall-clock ceiling for all AI attempts within one heal (default `60000`,
+  minimum `1000`); per-request timeouts are capped to what is left of it
 
 ### TypeScript Conventions
 

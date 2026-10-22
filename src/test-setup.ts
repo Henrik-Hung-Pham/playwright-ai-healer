@@ -25,6 +25,7 @@ vi.mock('./config/index.js', () => ({
             healing: {
                 maxRetries: 3,
                 retryDelay: 5000,
+                budgetMs: 60000,
                 confidenceThreshold: 0.7,
                 domSnapshotCharLimit: 2000,
                 failureMode: 'fail' as 'fail' | 'skip',
