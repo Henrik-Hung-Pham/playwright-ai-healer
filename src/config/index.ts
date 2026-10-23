@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { loadEnvironment } from '../utils/Environment.js';
 import { logger } from '../utils/Logger.js';
 import { buildHealingPrompt } from '../ai/HealingPrompt.js';
-import type { AIProvider } from '../types.js';
+import type { AIProvider, HealingMode } from '../types.js';
 
 /**
  * Category slugs for the demo target site (books.toscrape.com).
@@ -58,10 +58,17 @@ const envSchema = z.object({
         .transform(val => val !== 'false'),
     LOCATOR_STORE: z.enum(['file', 'sqlite']).default('file'),
     HEALING_FAILURE_MODE: z.enum(['fail', 'skip']).default('fail'),
+    // Defaults to 'apply' so existing setups are unchanged. See the HealingMode
+    // docs in types.ts for why 'suggest' is the safer choice in CI.
+    HEALING_MODE: z.enum(['off', 'suggest', 'apply']).default('apply'),
     // Consecutive post-heal failures tolerated before a healed selector is rolled
     // back to the value it replaced. 1 would revert on the first flake; the default
     // of 3 requires a consistent pattern before discarding a heal.
     SELECTOR_QUARANTINE_THRESHOLD: z.string().default('3').transform(Number).pipe(z.number().int().min(1)),
+    // Wall-clock ceiling for one heal's AI round-trips — every attempt, backoff,
+    // key rotation, and provider switch together. Must leave room inside
+    // TEST_TIMEOUT for the original failed action and the retried one.
+    HEALING_BUDGET_MS: z.string().default('60000').transform(Number).pipe(z.number().int().min(1000)),
 });
 
 export type AppConfig = {
@@ -75,8 +82,10 @@ export type AppConfig = {
         gemini: { apiKey: string | undefined; modelName: string };
         openai: { apiKeys: string[]; modelName: string; apiKey: string | undefined };
         healing: {
+            mode: HealingMode;
             maxRetries: number;
             retryDelay: number;
+            budgetMs: number;
             confidenceThreshold: number;
             domSnapshotCharLimit: number;
             failureMode: 'fail' | 'skip';
@@ -114,12 +123,25 @@ function buildConfig(): AppConfig {
 
     const env = envSchema.parse(process.env);
 
-    // Validate that the selected provider has a key
-    if (env.AI_PROVIDER === 'gemini' && !env.GEMINI_API_KEY) {
-        throw new Error('GEMINI_API_KEY is required when AI_PROVIDER is gemini');
-    }
-    if (env.AI_PROVIDER === 'openai' && !env.OPENAI_API_KEY && !env.OPENAI_API_KEYS) {
-        throw new Error('OPENAI_API_KEY or OPENAI_API_KEYS is required when AI_PROVIDER is openai');
+    // Validate that the selected provider has a key.
+    //
+    // Skipped entirely when HEALING_MODE=off: with healing disabled no request is
+    // ever made, so demanding a credential would make the kill switch unusable —
+    // which is exactly the state this mode exists to fix. Both 'suggest' and
+    // 'apply' call the provider and so still require a key.
+    if (env.HEALING_MODE !== 'off') {
+        if (env.AI_PROVIDER === 'gemini' && !env.GEMINI_API_KEY) {
+            throw new Error(
+                'GEMINI_API_KEY is required when AI_PROVIDER is gemini. ' +
+                    'Set HEALING_MODE=off to run the suite without healing.'
+            );
+        }
+        if (env.AI_PROVIDER === 'openai' && !env.OPENAI_API_KEY && !env.OPENAI_API_KEYS) {
+            throw new Error(
+                'OPENAI_API_KEY or OPENAI_API_KEYS is required when AI_PROVIDER is openai. ' +
+                    'Set HEALING_MODE=off to run the suite without healing.'
+            );
+        }
     }
 
     return {
@@ -142,8 +164,12 @@ function buildConfig(): AppConfig {
                 apiKey: env.OPENAI_API_KEY,
             },
             healing: {
+                mode: env.HEALING_MODE,
                 maxRetries: 3,
-                retryDelay: 5000,
+                // Backoff base unit. Was 5000 but never read — the orchestrator used
+                // its own 1000 default — so 1000 keeps the observed behaviour.
+                retryDelay: 1000,
+                budgetMs: env.HEALING_BUDGET_MS,
                 confidenceThreshold: 0.7,
                 domSnapshotCharLimit: env.DOM_SNAPSHOT_CHAR_LIMIT,
                 failureMode: env.HEALING_FAILURE_MODE,
