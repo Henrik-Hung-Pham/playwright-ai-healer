@@ -5,7 +5,13 @@ import * as lockfile from 'proper-lockfile';
 import { logger } from './Logger.js';
 import { createLocatorAdapter, type LocatorAdapter } from './LocatorAdapter.js';
 import { config } from '../config/index.js';
-import type { MetricsStore, SelectorFailureOutcome, SelectorMetrics } from '../types.js';
+import {
+    MAX_PROVENANCE_ENTRIES,
+    type HealProvenance,
+    type MetricsStore,
+    type SelectorFailureOutcome,
+    type SelectorMetrics,
+} from '../types.js';
 import type { ElementFingerprint } from '../ai/ElementFingerprint.js';
 
 // Get current directory name in ESM
@@ -275,23 +281,91 @@ export class LocatorManager {
      * most recent heal, not lifetime failures.
      *
      * @param key - Dot-path locator key (e.g. `'booksToScrape.bookTitle'`)
-     * @param previousSelector - The selector this heal replaced. Stored as the
-     *   rollback target for {@link recordSelectorFailure}. Omitting it means the
-     *   heal cannot be rolled back later, since the value it replaced is then
-     *   unrecoverable — callers that know the prior selector should always pass it.
+     * @param provenance - What was replaced and on whose authority. Optional so
+     *   existing callers keep working, but omitting it means the heal cannot
+     *   later be reviewed, automatically rolled back by {@link recordSelectorFailure},
+     *   or manually undone by {@link revertLocator} — nothing records the value
+     *   it replaced.
      */
-    public async recordSelectorHealed(key: string, previousSelector?: string): Promise<void> {
+    public async recordSelectorHealed(key: string, provenance?: HealProvenance): Promise<void> {
         await this.atomicMetricUpdate(key, existing => {
+            const history = provenance
+                ? [...(existing.history ?? []), provenance].slice(-MAX_PROVENANCE_ENTRIES)
+                : existing.history;
             const next: SelectorMetrics = {
                 ...existing,
                 failureCount: 0, // reset: count failures per heal cycle, not lifetime
                 healedAt: new Date().toISOString(),
+                ...(history ? { history } : {}),
             };
-            if (previousSelector !== undefined) {
-                next.previousSelector = previousSelector;
+            if (provenance !== undefined) {
+                // The single-slot rollback target `recordSelectorFailure` consumes on
+                // automatic quarantine; `history` below is the fuller, independent
+                // audit trail `revertLocator` walks back through manually.
+                next.previousSelector = provenance.previousSelector;
             }
             return next;
         });
+    }
+
+    /**
+     * Return the recorded heal history for a key, oldest first.
+     *
+     * @param key - Dot-path locator key.
+     * @returns The heals applied to this key, or an empty array when none were recorded.
+     */
+    public getProvenance(key: string): HealProvenance[] {
+        return this.metrics[key]?.history ?? [];
+    }
+
+    /**
+     * Undo the most recent heal, restoring the selector it replaced.
+     *
+     * This is the counterpart the store never had. A heal overwrites a
+     * human-authored selector in place; without a way back, a wrong heal is
+     * permanent and the original intent is lost — the reviewer cannot even see
+     * what the selector used to be. Manual and independent of the automatic
+     * quarantine rollback in {@link recordSelectorFailure}: that one fires on
+     * `SELECTOR_QUARANTINE_THRESHOLD` consecutive failures and only ever
+     * restores the single most recent heal; this one can be called on demand
+     * and walks back through successive heals one at a time.
+     *
+     * The reverted entry is popped from the history, so repeated calls walk back
+     * through successive heals rather than restoring the same value forever.
+     *
+     * @param key - Dot-path locator key.
+     * @returns The restored selector, or `null` when there is nothing to revert.
+     */
+    public async revertLocator(key: string): Promise<string | null> {
+        const history = this.metrics[key]?.history ?? [];
+        const last = history[history.length - 1];
+        if (!last) {
+            logger.warn(`[LocatorManager] ↩️ Cannot revert '${key}' — no heal history recorded.`);
+            return null;
+        }
+
+        await this.updateLocator(key, last.previousSelector);
+        await this.atomicMetricUpdate(key, existing => {
+            const next: SelectorMetrics = {
+                failureCount: 0,
+                history: (existing.history ?? []).slice(0, -1),
+                // healedAt and previousSelector are intentionally omitted, mirroring
+                // the automatic quarantine rollback: no heal is in effect any more,
+                // so failures of the restored selector must not be attributed to it.
+            };
+            if (existing.lastFailedAt !== undefined) next.lastFailedAt = existing.lastFailedAt;
+            if (existing.quarantinedSelector !== undefined) next.quarantinedSelector = existing.quarantinedSelector;
+            if (existing.quarantinedAt !== undefined) next.quarantinedAt = existing.quarantinedAt;
+            if (existing.quarantineCount !== undefined) next.quarantineCount = existing.quarantineCount;
+            return next;
+        });
+
+        logger.warn(
+            `[LocatorManager] ↩️ Reverted '${key}' to '${last.previousSelector}' ` +
+                `(undoing the ${last.provider}/${last.model} heal to '${last.healedSelector}' ` +
+                `from ${last.healedAt}).`
+        );
+        return last.previousSelector;
     }
 
     /**
