@@ -209,7 +209,7 @@ export class AutoHealer {
                         test.info().annotations.push({ type: 'warning', description: `Test skipped because ${msg}` });
                         test.skip(true, `Test skipped because ${msg}`);
                     } else {
-                        throw new Error(`[AutoHealer] ${msg}`);
+                        throw new Error(`[AutoHealer] ${msg}`, { cause: retryError });
                     }
                 }
             } else {
@@ -226,7 +226,7 @@ export class AutoHealer {
                     test.info().annotations.push({ type: 'warning', description: `Test skipped because ${msg}` });
                     test.skip(true, `Test skipped because ${msg}`);
                 } else {
-                    throw new Error(`[AutoHealer] ${msg} Original selector: '${selector}'.`);
+                    throw new Error(`[AutoHealer] ${msg} Original selector: '${selector}'.`, { cause: error });
                 }
             }
         }
