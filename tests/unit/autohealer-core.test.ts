@@ -112,7 +112,9 @@ describe('AutoHealer Core Logic', () => {
             fill: vi.fn(),
             locator: vi.fn().mockReturnValue({
                 waitFor: vi.fn().mockResolvedValue(undefined),
-                count: vi.fn().mockResolvedValue(1),
+                // 0 matches until the AI has been asked (the failing selector is
+                // broken), then 1 (the healed selector resolves uniquely).
+                count: vi.fn(() => Promise.resolve(mockGenerateContent.mock.calls.length > 0 ? 1 : 0)),
             }),
         };
 
