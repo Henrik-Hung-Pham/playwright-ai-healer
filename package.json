@@ -45,7 +45,7 @@
     "type": "module",
     "overrides": {
         "brace-expansion": "^5.0.12",
-        "undici": "^7.29.1",
+        "undici": "7.30.1",
         "markdown-it": "^14.3.3",
         "source-map-js": "^1.2.2"
     },
@@ -56,7 +56,7 @@
         "openai": "^6.16.0",
         "proper-lockfile": "^4.1.2",
         "winston": "^3.19.0",
-        "zod": "^4.3.6"
+        "zod": "^4.6.7"
     },
     "devDependencies": {
         "@eslint/js": "^9.39.2",
