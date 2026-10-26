@@ -49,6 +49,7 @@ This is a **self-healing Playwright test automation framework**. When a selector
 Test → BasePage.safeClick/safeFill
      → AutoHealer.click/fill
      → page.click(selector)  ← if fails →
+     → selector still resolves to exactly 1 element? → rethrow original error (not a selector problem)
      → DOMSerializer.getSimplifiedDOM() → AIClientManager.makeRequest() → AI provider (Gemini/OpenAI)
      → ResponseParser.parseAIResponse() cleans raw output
      → retry action with new selector
@@ -85,9 +86,18 @@ Environment is selected by `TEST_ENV` variable (`dev`/`staging`/`prod`). The con
 - `GEMINI_API_KEY` — required if provider is `gemini`
 - `GEMINI_MODEL` — Gemini/Gemma model name (default: `gemma-4-31b-it`)
 - `OPENAI_API_KEY` / `OPENAI_API_KEYS` (comma-separated for rotation) — required if provider is `openai`
+- `HEALING_MODE=off|suggest|apply` (default: `apply`) — how far a failed interaction may travel.
+  `off` disables healing entirely: nothing is sent to a provider and no API key is required, so it
+  is the graceful kill switch (unsetting the key instead makes `resolveAIProvider` throw and aborts
+  the run). `suggest` heals, scores, and records — but does not retry the action and does not
+  persist; the test still fails with its original error and the proposal is attached as a
+  `healing-suggestion` annotation. Prefer `suggest` in CI: under `apply` a heal that succeeds
+  against a genuinely broken feature reports green while the feature was never exercised.
 - `BASE_URL`, `LOG_LEVEL`, `HEADLESS`, `TEST_TIMEOUT`
 - `SELECTOR_QUARANTINE_THRESHOLD` — consecutive post-heal failures before a healed selector is
   rolled back to the value it replaced (default `3`, minimum `1`)
+- `HEALING_BUDGET_MS` — wall-clock ceiling for all AI attempts within one heal (default `60000`,
+  minimum `1000`); per-request timeouts are capped to what is left of it
 
 ### TypeScript Conventions
 
