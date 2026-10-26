@@ -64,7 +64,9 @@ describe('locators.json production store', () => {
     const raw = fs.readFileSync(LOCATORS_PATH, 'utf-8');
 
     it('is valid JSON', () => {
-        expect(() => JSON.parse(raw)).not.toThrow();
+        expect(() => {
+            JSON.parse(raw);
+        }).not.toThrow();
     });
 
     const parsed = JSON.parse(raw) as unknown;
