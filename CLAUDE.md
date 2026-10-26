@@ -49,6 +49,7 @@ This is a **self-healing Playwright test automation framework**. When a selector
 Test → BasePage.safeClick/safeFill
      → AutoHealer.click/fill
      → page.click(selector)  ← if fails →
+     → selector still resolves to exactly 1 element? → rethrow original error (not a selector problem)
      → DOMSerializer.getSimplifiedDOM() → AIClientManager.makeRequest() → AI provider (Gemini/OpenAI)
      → ResponseParser.parseAIResponse() cleans raw output
      → retry action with new selector

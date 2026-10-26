@@ -129,6 +129,13 @@ describe('AutoHealer — HEALING_MODE', () => {
         });
 
         it('does contact the provider and record the heal', async () => {
+            // The selector gate only lets a heal proceed when the original
+            // selector no longer resolves to exactly one element; the engine
+            // then separately scores the candidate selector as unique.
+            let calls = 0;
+            (page.locator as unknown as () => { count: ReturnType<typeof vi.fn> })().count = vi.fn(() =>
+                Promise.resolve(calls++ === 0 ? 0 : 1)
+            );
             const healer = new AutoHealer(page as Page, 'key', 'gemini');
 
             await expect(healer.click('#missing')).rejects.toThrow();
@@ -158,6 +165,12 @@ describe('AutoHealer — HEALING_MODE', () => {
         });
 
         it('returns the suggestion alongside the failure in healAll', async () => {
+            // Same gate as above: the original selector must look broken to
+            // trigger healing, then the candidate is scored as unique.
+            let calls = 0;
+            (page.locator as unknown as () => { count: ReturnType<typeof vi.fn> })().count = vi.fn(() =>
+                Promise.resolve(calls++ === 0 ? 0 : 1)
+            );
             const healer = new AutoHealer(page as Page, 'key', 'gemini');
 
             const results = await healer.healAll([{ selectorOrKey: '#missing', action: 'click' }]);
@@ -181,6 +194,13 @@ describe('AutoHealer — HEALING_MODE', () => {
         });
 
         it('retries with the healed selector and persists it', async () => {
+            // The gate's count check runs twice here: once on the original
+            // selector (must look broken to trigger healing), once on the healed
+            // selector during retry validation (must resolve to exactly one).
+            let calls = 0;
+            (page.locator as unknown as () => { count: ReturnType<typeof vi.fn> })().count = vi.fn(() =>
+                Promise.resolve(calls++ === 0 ? 0 : 1)
+            );
             // First call (original selector) fails, retry with the healed one succeeds.
             const click = vi
                 .fn()
