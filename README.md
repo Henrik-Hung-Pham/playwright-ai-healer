@@ -107,6 +107,17 @@ TEST_TIMEOUT=120000
 HEADLESS=true
 
 # AI Healing (optional — defaults shown)
+HEALING_MODE=apply             # 'apply'   (default) heal, retry the action, persist the selector
+                               # 'suggest' heal and report, but do NOT apply or persist — the test
+                               #           still fails with its original error and the proposed
+                               #           selector is attached as a test annotation
+                               # 'off'     no healing at all; no DOM leaves the process and no API
+                               #           key is required
+                               #
+                               # Prefer 'suggest' in CI. Under 'apply', a heal that succeeds against
+                               # a genuinely broken feature turns a real regression green — the suite
+                               # passes while the thing under test was never exercised. 'suggest'
+                               # keeps the failure signal and still tells you what would have fixed it.
 DOM_SNAPSHOT_CHAR_LIMIT=12000  # Max chars of DOM sent to AI; must be >= 100. This is the whole
                                # budget — the serialiser enforces it while walking the tree and
                                # appends an explicit `<!-- DOM truncated … -->` notice if it runs
@@ -116,6 +127,9 @@ HEALING_FAILURE_MODE=fail      # 'fail' (default) throws when healing cannot pro
                                # skipped test reports green, hiding a healer that never worked.
 SELECTOR_QUARANTINE_THRESHOLD=3  # Consecutive post-heal failures before a healed selector is
                                  # rolled back to the value it replaced. Must be >= 1.
+HEALING_BUDGET_MS=60000          # Wall-clock ceiling for one heal's AI round-trips (all retries,
+                                 # key rotations, and provider switches). Keep it well inside
+                                 # TEST_TIMEOUT. Must be >= 1000.
 
 # Locator Storage Backend
 LOCATOR_STORE=file    # 'file' (default, JSON + lockfile) or 'sqlite' (ACID SQLite)

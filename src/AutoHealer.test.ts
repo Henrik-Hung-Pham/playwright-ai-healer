@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import type { Page } from '@playwright/test';
-import { mockGeminiGenerateContent } from './test-setup.js';
+import { test, type Page } from '@playwright/test';
+import { mockGeminiGenerateContent, mockOpenaiCreate } from './test-setup.js';
 import { AutoHealer } from './AutoHealer.js';
 import { validateSelector } from './ai/SelectorValidator.js';
 
@@ -27,12 +27,22 @@ vi.mock('./utils/LocatorManager.js', () => ({
     },
 }));
 
+/**
+ * Match count that models a genuinely broken selector: nothing matches until the
+ * AI has been asked, and exactly one element matches afterwards (the healed
+ * selector). AutoHealer only heals when the failing selector no longer resolves
+ * to one element, so a flat `count() === 1` would describe a working selector
+ * whose interaction failed for some other reason — which is not healed.
+ */
+const brokenThenHealedCount = () =>
+    Promise.resolve(mockGeminiGenerateContent.mock.calls.length + mockOpenaiCreate.mock.calls.length > 0 ? 1 : 0);
+
 // Mock page factory — includes all methods exercised by the 8 public action methods
 const createMockPage = (): Partial<Page> => {
     const mockLocatorHandle = {
         waitFor: vi.fn().mockResolvedValue(undefined),
         pressSequentially: vi.fn().mockResolvedValue(undefined),
-        count: vi.fn().mockResolvedValue(1),
+        count: vi.fn(brokenThenHealedCount),
     };
     return {
         click: vi.fn(),
@@ -470,7 +480,7 @@ describe('AutoHealer', () => {
             const mockLocatorHandle = {
                 waitFor: vi.fn().mockResolvedValue(undefined),
                 pressSequentially: pressSequentiallyMock,
-                count: vi.fn().mockResolvedValue(1),
+                count: vi.fn(brokenThenHealedCount),
             };
             (mockPage.locator as ReturnType<typeof vi.fn>).mockReturnValue(mockLocatorHandle);
 
@@ -598,6 +608,154 @@ describe('AutoHealer', () => {
         });
     });
 
+    describe('healed-selector annotation', () => {
+        let annotations: { type: string; description?: string }[];
+
+        beforeEach(() => {
+            annotations = [];
+            vi.mocked(test.info).mockReturnValue({ annotations } as unknown as ReturnType<typeof test.info>);
+        });
+
+        it('marks the test when an interaction succeeded only because of a heal', async () => {
+            (mockPage.click as ReturnType<typeof vi.fn>)
+                .mockRejectedValueOnce(new Error('Element not found'))
+                .mockResolvedValueOnce(undefined);
+
+            const healer = new AutoHealer(mockPage as Page, 'test-key', 'gemini');
+            await healer.click('app.btn');
+
+            expect(annotations).toHaveLength(1);
+            expect(annotations[0]?.type).toBe('healed-selector');
+            expect(annotations[0]?.description).toMatch(
+                /^'app\.btn' '#old-selector' → '#healed-selector' \(confidence \d\.\d{2}, strategy \w+\)$/
+            );
+        });
+
+        it('adds nothing when no heal was needed', async () => {
+            (mockPage.click as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+
+            const healer = new AutoHealer(mockPage as Page, 'test-key', 'gemini');
+            await healer.click('#existing-button');
+
+            expect(annotations).toEqual([]);
+        });
+
+        it('adds nothing when the heal did not produce a working selector', async () => {
+            (mockPage.click as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('Element not found'));
+            mockGeminiGenerateContent.mockResolvedValue({ response: { text: () => 'FAIL' } });
+
+            const healer = new AutoHealer(mockPage as Page, 'test-key', 'gemini');
+            await expect(healer.click('#broken')).rejects.toThrow();
+
+            expect(annotations.filter(a => a.type === 'healed-selector')).toEqual([]);
+        });
+
+        it('still heals when called outside a Playwright test', async () => {
+            vi.mocked(test.info).mockImplementation(() => {
+                throw new Error('test.info() can only be called while test is running');
+            });
+            (mockPage.click as ReturnType<typeof vi.fn>)
+                .mockRejectedValueOnce(new Error('Element not found'))
+                .mockResolvedValueOnce(undefined);
+
+            const healer = new AutoHealer(mockPage as Page, 'test-key', 'gemini');
+            await expect(healer.click('#broken')).resolves.toBeUndefined();
+        });
+
+        it('marks healAll operations that were healed', async () => {
+            (mockPage.click as ReturnType<typeof vi.fn>)
+                .mockRejectedValueOnce(new Error('Element not found'))
+                .mockResolvedValueOnce(undefined);
+
+            const healer = new AutoHealer(mockPage as Page, 'test-key', 'gemini');
+            await healer.healAll([{ selectorOrKey: '#broken-btn', action: 'click' }]);
+
+            expect(annotations.map(a => a.type)).toEqual(['healed-selector']);
+            expect(annotations[0]?.description).toContain("'#broken-btn' → '#healed-selector'");
+        });
+    });
+
+    describe('heal gate — only broken selectors are healed', () => {
+        const setOriginalCount = (count: () => Promise<number>) => {
+            (mockPage.locator as ReturnType<typeof vi.fn>).mockReturnValue({
+                waitFor: vi.fn().mockResolvedValue(undefined),
+                count: vi.fn(count),
+            });
+        };
+
+        it('rethrows the original error when the selector still resolves to exactly one element', async () => {
+            // The element is there — it is just not clickable (disabled, covered, …).
+            // Asking the AI for a *different* element would mask a real regression.
+            setOriginalCount(() => Promise.resolve(1));
+            const original = new Error('Element is not enabled');
+            (mockPage.click as ReturnType<typeof vi.fn>).mockRejectedValue(original);
+
+            const healer = new AutoHealer(mockPage as Page, 'test-key', 'gemini');
+
+            await expect(healer.click('app.btn')).rejects.toBe(original);
+            expect(mockGeminiGenerateContent).not.toHaveBeenCalled();
+            expect(mockLocatorManager.recordSelectorFailure).not.toHaveBeenCalled();
+            expect(mockLocatorManager.updateLocator).not.toHaveBeenCalled();
+        });
+
+        it('heals when the selector matches several elements (strict-mode violation)', async () => {
+            let calls = 0;
+            // Ambiguous original, then the healed selector resolves uniquely.
+            setOriginalCount(() => Promise.resolve(calls++ === 0 ? 2 : 1));
+            (mockPage.click as ReturnType<typeof vi.fn>)
+                .mockRejectedValueOnce(new Error('strict mode violation: resolved to 2 elements'))
+                .mockResolvedValueOnce(undefined);
+
+            const healer = new AutoHealer(mockPage as Page, 'test-key', 'gemini');
+            await healer.click('#ambiguous');
+
+            expect(mockGeminiGenerateContent).toHaveBeenCalled();
+            expect(mockPage.click).toHaveBeenLastCalledWith('#healed-selector', undefined);
+        });
+
+        it('heals when the selector is not even parseable', async () => {
+            let calls = 0;
+            setOriginalCount(() =>
+                calls++ === 0 ? Promise.reject(new Error('Unexpected token')) : Promise.resolve(1)
+            );
+            (mockPage.click as ReturnType<typeof vi.fn>)
+                .mockRejectedValueOnce(new Error('Unexpected token'))
+                .mockResolvedValueOnce(undefined);
+
+            const healer = new AutoHealer(mockPage as Page, 'test-key', 'gemini');
+            await healer.click('div[[');
+
+            expect(mockGeminiGenerateContent).toHaveBeenCalled();
+        });
+
+        it('rethrows the original error when the page has closed', async () => {
+            const original = new Error('Target page, context or browser has been closed');
+            (mockPage.click as ReturnType<typeof vi.fn>).mockRejectedValue(original);
+            (mockPage as { isClosed?: () => boolean }).isClosed = () => true;
+
+            const healer = new AutoHealer(mockPage as Page, 'test-key', 'gemini');
+
+            await expect(healer.click('#gone')).rejects.toBe(original);
+            expect(mockGeminiGenerateContent).not.toHaveBeenCalled();
+        });
+
+        it('healAll reports the original error without healing when the selector still resolves', async () => {
+            setOriginalCount(() => Promise.resolve(1));
+            (mockPage.click as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('Element is not enabled'));
+
+            const healer = new AutoHealer(mockPage as Page, 'test-key', 'gemini');
+            const results = await healer.healAll([{ selectorOrKey: 'app.btn', action: 'click' }]);
+
+            expect(results[0]).toEqual({
+                selectorOrKey: 'app.btn',
+                success: false,
+                error: 'Error: Element is not enabled',
+            });
+            expect(mockGeminiGenerateContent).not.toHaveBeenCalled();
+            expect(mockLocatorManager.recordSelectorFailure).not.toHaveBeenCalled();
+        });
+    });
+
     describe('healAll()', () => {
         it('should return success for all operations when none fail', async () => {
             (mockPage.click as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
@@ -662,9 +820,17 @@ describe('AutoHealer', () => {
             await healer.healAll([{ selectorOrKey: 'app.btn', action: 'click' }]);
 
             expect(mockLocatorManager.updateLocator).toHaveBeenCalledWith('app.btn', '#healed-selector');
-            // The pre-heal selector is passed through as the rollback target, so a
-            // heal that turns out to be wrong can later be reverted.
-            expect(mockLocatorManager.recordSelectorHealed).toHaveBeenCalledWith('app.btn', '#old-selector');
+            // The heal is recorded with its audit trail, so it can be reviewed and
+            // reverted — automatically (SELECTOR_QUARANTINE_THRESHOLD) or manually.
+            expect(mockLocatorManager.recordSelectorHealed).toHaveBeenCalledWith(
+                'app.btn',
+                expect.objectContaining({
+                    previousSelector: '#old-selector',
+                    healedSelector: '#healed-selector',
+                    provider: 'gemini',
+                    strategy: 'id',
+                })
+            );
         });
 
         it('should handle hover action in runOperation', async () => {

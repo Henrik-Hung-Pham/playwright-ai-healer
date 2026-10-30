@@ -112,7 +112,9 @@ describe('AutoHealer Core Logic', () => {
             fill: vi.fn(),
             locator: vi.fn().mockReturnValue({
                 waitFor: vi.fn().mockResolvedValue(undefined),
-                count: vi.fn().mockResolvedValue(1),
+                // 0 matches until the AI has been asked (the failing selector is
+                // broken), then 1 (the healed selector resolves uniquely).
+                count: vi.fn(() => Promise.resolve(mockGenerateContent.mock.calls.length > 0 ? 1 : 0)),
             }),
         };
 
@@ -202,9 +204,12 @@ describe('AutoHealer Core Logic', () => {
 
             // Expect updateLocator to be called
             expect(mockUpdateLocator).toHaveBeenCalledWith(key, healedSelector);
-            // Expect recordSelectorHealed to be called after a successful heal, with
-            // the pre-heal selector as the rollback target.
-            expect(mockRecordSelectorHealed).toHaveBeenCalledWith(key, brokenSelector);
+            // Expect recordSelectorHealed to be called after a successful heal,
+            // carrying the provenance that makes the change reviewable/revertible.
+            expect(mockRecordSelectorHealed).toHaveBeenCalledWith(
+                key,
+                expect.objectContaining({ healedSelector, previousSelector: brokenSelector })
+            );
         });
 
         it('should record selector failure when a keyed selector fails', async () => {
@@ -323,7 +328,10 @@ describe('AutoHealer Core Logic', () => {
             expect(mockUpdateLocator).toHaveBeenCalledWith('page.button', healedSelector);
             // healAll records the pre-heal selector too, so a bad heal reached via
             // the concurrent path is just as reversible as one via executeAction.
-            expect(mockRecordSelectorHealed).toHaveBeenCalledWith('page.button', '#broken-btn');
+            expect(mockRecordSelectorHealed).toHaveBeenCalledWith(
+                'page.button',
+                expect.objectContaining({ healedSelector, previousSelector: '#broken-btn' })
+            );
         });
 
         it('should return failure with error message when AI returns null (FAIL)', async () => {
