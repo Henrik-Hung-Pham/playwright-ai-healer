@@ -259,8 +259,7 @@ export class SQLiteAdapter implements LocatorAdapter {
 
     getLocator(key: string): string | null {
         const row = this.db.prepare('SELECT selector FROM locators WHERE key = ?').get(key) as
-            | { selector: string }
-            | undefined;
+            { selector: string } | undefined;
         return row?.selector ?? null;
     }
 
