@@ -24,6 +24,19 @@ on:
   workflow_dispatch:
     # Allow manual trigger from GitHub Actions UI
 
+# Least privilege: this job reads the lockfile and asks npm about advisories.
+# It never needs write access to anything.
+permissions:
+  contents: read
+
+# A superseded dependency-bump push has nothing useful to say once a newer
+# commit exists, so PR runs cancel their predecessor. Scheduled and manual runs
+# each get their own group (keyed on `run_id`): a shared group would let a newer
+# pending run cancel an older one even with `cancel-in-progress: false`.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
   audit:
     runs-on: ubuntu-24.04

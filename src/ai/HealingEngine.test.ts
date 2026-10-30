@@ -37,7 +37,13 @@ vi.mock('../utils/Logger.js', () => ({
 vi.mock('../config/index.js', () => ({
     config: {
         ai: {
-            healing: { domSnapshotCharLimit: 2000, confidenceThreshold: 0.7, maxRetries: 3, retryDelay: 100 },
+            healing: {
+                domSnapshotCharLimit: 2000,
+                confidenceThreshold: 0.7,
+                maxRetries: 3,
+                retryDelay: 100,
+                budgetMs: 3000,
+            },
             prompts: { healingPrompt: (_s: string, _e: string, _h: string) => 'mock-prompt' },
         },
         test: { timeouts: { default: 5000 } },
@@ -131,6 +137,56 @@ describe('HealingEngine', () => {
         expect(result?.reasoning).toMatch(/id selector/);
     });
 
+    describe('when the model echoes the original selector', () => {
+        /**
+         * A reply identical to the failing selector is never a repair — it is the
+         * model restating the problem, which reasoning models do routinely.
+         *
+         * The uniqueness gate alone does not catch this. It only rejects an echo
+         * when the original resolves to zero elements; a selector that failed for
+         * any other reason (overlay, detached node, strict-mode ambiguity) still
+         * resolves, so the echo would score normally and be retried — and
+         * persisted — as if it were a fix.
+         */
+        it('rejects it even though it resolves to exactly one element', async () => {
+            mockParseAIResponse.mockReturnValue('#obscured-btn');
+            page = makeMockPage(1);
+
+            const result = await engine.heal(page, '#obscured-btn', new Error('intercepted by overlay'));
+
+            expect(result).toBeNull();
+        });
+
+        it('ignores surrounding whitespace when comparing', async () => {
+            mockParseAIResponse.mockReturnValue('  #obscured-btn  ');
+            page = makeMockPage(1);
+
+            const result = await engine.heal(page, '#obscured-btn', new Error('intercepted by overlay'));
+
+            expect(result).toBeNull();
+        });
+
+        it('records the attempt as a failed healing event', async () => {
+            mockParseAIResponse.mockReturnValue('#obscured-btn');
+            page = makeMockPage(1);
+
+            await engine.heal(page, '#obscured-btn', new Error('intercepted by overlay'));
+
+            const event = engine.getHealingEvents().at(-1);
+            expect(event?.success).toBe(false);
+            expect(event?.result).toBeNull();
+        });
+
+        it('still accepts a genuinely different selector', async () => {
+            mockParseAIResponse.mockReturnValue('#replacement-btn');
+            page = makeMockPage(1);
+
+            const result = await engine.heal(page, '#obscured-btn', new Error('intercepted by overlay'));
+
+            expect(result?.selector).toBe('#replacement-btn');
+        });
+    });
+
     it('rejects a low-confidence ambiguous selector below the threshold', async () => {
         // A class selector matching many elements scores 0.6 < 0.7 threshold.
         mockParseAIResponse.mockReturnValue('.product_pod');
@@ -174,6 +230,14 @@ describe('HealingEngine', () => {
             expect(result).toBeNull();
             // Fast-failed: no AI request and no DOM-based scoring were attempted.
             expect(clientManager.makeRequest).not.toHaveBeenCalled();
+        });
+
+        it('marks a fast-failed heal providerUnavailable', async () => {
+            tripBreaker('gemini');
+
+            await engine.heal(page, '#old-btn', new Error('not found'));
+
+            expect(engine.getHealingEvents()[0]?.providerUnavailable).toBe(true);
         });
 
         it('does not fast-fail a provider whose breaker is still closed', async () => {
@@ -332,6 +396,16 @@ describe('HealingEngine', () => {
         expect(vi.mocked(clientManager.makeRequest).mock.calls.length).toBeGreaterThan(1);
     });
 
+    it('caps the per-request timeout at the remaining healing budget', async () => {
+        await engine.heal(page, '#selector', new Error('not found'));
+
+        // test.timeouts.default is 5000 but the healing budget is 3000, so the
+        // request must not be allowed to outlive the budget.
+        const timeout = vi.mocked(clientManager.makeRequest).mock.calls[0]?.[1];
+        expect(timeout).toBeLessThanOrEqual(3000);
+        expect(timeout).toBeGreaterThan(2000);
+    });
+
     it('returns null on 4xx error when no alternate provider is available', async () => {
         const clientError = Object.assign(new Error('Rate limit exceeded'), { status: 429 });
         vi.mocked(clientManager.makeRequest).mockRejectedValue(clientError);
@@ -370,6 +444,45 @@ describe('HealingEngine', () => {
         await engine.heal(page, '#selector', new Error('not found'));
 
         expect(engine.getHealingEvents()[0]).not.toHaveProperty('rateLimited');
+    });
+
+    it.each([
+        ['a 500', Object.assign(new Error('Internal error encountered'), { status: 500 })],
+        ['a 503', Object.assign(new Error('This model is currently experiencing high demand'), { status: 503 })],
+        ['a timeout', new Error('[AutoHealer] Gemini API request timed out after 60s')],
+    ])('marks the event providerUnavailable when %s survives every retry', async (_label, outage) => {
+        vi.useFakeTimers();
+        vi.mocked(clientManager.makeRequest).mockRejectedValue(outage);
+
+        const healPromise = engine.heal(page, '#selector', new Error('not found'));
+        await vi.runAllTimersAsync();
+        await healPromise;
+        vi.useRealTimers();
+
+        const event = engine.getHealingEvents()[0];
+        expect(event?.providerUnavailable).toBe(true);
+        expect(event).not.toHaveProperty('rateLimited');
+    });
+
+    it('does not mark the event providerUnavailable when an outage recovers', async () => {
+        vi.useFakeTimers();
+        const outage = Object.assign(new Error('Service Unavailable'), { status: 503 });
+        vi.mocked(clientManager.makeRequest).mockRejectedValueOnce(outage).mockResolvedValueOnce({ raw: '#healed' });
+
+        const healPromise = engine.heal(page, '#selector', new Error('not found'));
+        await vi.runAllTimersAsync();
+        await healPromise;
+        vi.useRealTimers();
+
+        expect(engine.getHealingEvents()[0]).not.toHaveProperty('providerUnavailable');
+    });
+
+    it('does not mark the event providerUnavailable for non-outage failures', async () => {
+        vi.mocked(clientManager.makeRequest).mockRejectedValue(new Error('fatal: bad request'));
+
+        await engine.heal(page, '#selector', new Error('not found'));
+
+        expect(engine.getHealingEvents()[0]).not.toHaveProperty('providerUnavailable');
     });
 
     it('rotates to the next API key on 401 auth error', async () => {

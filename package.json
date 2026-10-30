@@ -50,7 +50,7 @@
         "openai": "^6.16.0",
         "proper-lockfile": "^4.1.2",
         "winston": "^3.19.0",
-        "zod": "^4.3.6"
+        "zod": "^4.6.7"
     },
     "devDependencies": {
         "@eslint/js": "^9.39.2",
@@ -60,7 +60,7 @@
         "@types/proper-lockfile": "^4.1.4",
         "@typescript-eslint/eslint-plugin": "^8.71.2",
         "@typescript-eslint/parser": "^8.71.2",
-        "@vitest/coverage-v8": "^4.0.18",
+        "@vitest/coverage-v8": "^4.1.12",
         "cross-env": "^7.0.3",
         "eslint": "^10.12.0",
         "eslint-config-prettier": "^10.1.8",
@@ -72,6 +72,11 @@
         "typedoc": "^0.28.20",
         "typescript": "^5.9.3",
         "typescript-eslint": "^8.71.2",
-        "vitest": "^4.0.18"
+        "vitest": "^4.1.12"
+    },
+    "overrides": {
+        "markdown-it": "14.3.3",
+        "vite": "8.3.3",
+        "undici": "7.30.1"
     }
 }

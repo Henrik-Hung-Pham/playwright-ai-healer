@@ -57,13 +57,24 @@ export const test = base.extend<MyFixtures, MyWorkerFixtures>({
     ],
 
     autoHealer: async ({ page }, use) => {
+        // HEALING_MODE=off must not require a credential — `resolveAIProvider`
+        // throws when the selected provider has no key, so calling it here would
+        // abort the run and defeat the kill switch. AutoHealer short-circuits
+        // before reaching the client in this mode, so an empty key list is never
+        // dereferenced.
+        if (config.ai.healing.mode === 'off') {
+            logger.debug('[Fixture] HEALING_MODE=off — AutoHealer constructed without an AI client.');
+            await use(new AutoHealer(page, [], config.ai.provider, undefined, true));
+            return;
+        }
+
         // Provider selection is `AI_PROVIDER`'s job, delegated to
         // `resolveAIProvider` so it is unit-testable. This fixture used to pick by
         // key presence instead — `if (ai.gemini.apiKey) … else if (openai) …` —
         // which silently ran Gemini whenever a GEMINI_API_KEY happened to be set,
         // even with AI_PROVIDER=openai.
         const { provider, apiKeys, modelName } = resolveAIProvider(config.ai);
-        logger.debug(`[Fixture] AI_PROVIDER=${provider}, model=${modelName}`);
+        logger.debug(`[Fixture] AI_PROVIDER=${provider}, model=${modelName}, HEALING_MODE=${config.ai.healing.mode}`);
 
         const healer = new AutoHealer(page, apiKeys, provider, modelName, true);
         await use(healer);
@@ -78,20 +89,31 @@ export const test = base.extend<MyFixtures, MyWorkerFixtures>({
 
 /**
  * Run a step that depends on a live AI heal, skipping the test — rather than
- * failing it — when the heal failed because the provider rate-limited the
- * request (HTTP 429 / quota exhausted).
+ * failing it — when the heal failed because the provider never answered:
+ * it rate-limited the request (HTTP 429 / quota exhausted), or it was down
+ * (5xx / overload / timeout after every retry, or an already-open circuit breaker).
  *
- * A 429 means the provider never answered, so the test learned nothing about
- * healing; failing it would turn the pipeline red over shared-key quota rather
- * than a regression. Every other failure (wrong selector, 5xx, timeouts) is
- * rethrown unchanged.
+ * In both cases the test learned nothing about healing; failing it would turn
+ * the pipeline red over shared-key quota or a provider outage rather than a
+ * regression. A heal the provider *answered* and still got wrong is rethrown
+ * unchanged — that is the failure these tests exist to catch.
  */
-export async function skipIfRateLimited(autoHealer: AutoHealer | undefined, step: () => Promise<void>): Promise<void> {
+export async function skipIfProviderUnavailable(
+    autoHealer: AutoHealer | undefined,
+    step: () => Promise<void>
+): Promise<void> {
     try {
         await step();
     } catch (error) {
-        const rateLimited = autoHealer?.getHealingEvents().some(e => e.rateLimited) ?? false;
-        test.skip(rateLimited, 'AI provider rate-limited the heal request (429) — healing could not be exercised');
+        const events = autoHealer?.getHealingEvents() ?? [];
+        test.skip(
+            events.some(e => e.rateLimited),
+            'AI provider rate-limited the heal request (429) — healing could not be exercised'
+        );
+        test.skip(
+            events.some(e => e.providerUnavailable),
+            'AI provider was unavailable (5xx / timeout) — healing could not be exercised'
+        );
         throw error;
     }
 }

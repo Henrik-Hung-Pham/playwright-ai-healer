@@ -27,13 +27,71 @@ export function isRateLimitError(error: AIError): boolean {
 }
 
 /**
+ * Is this a provider-side outage (HTTP 5xx, overload, or a request timeout)?
+ *
+ * Exported for the same reason as {@link isRateLimitError}: a heal that ended
+ * here never got an answer, which callers must be able to tell apart from a
+ * heal the model answered and still got wrong.
+ */
+export function isServerError(error: AIError): boolean {
+    const msg = (error.message ?? '').toLowerCase();
+    return (
+        (error.status !== undefined && error.status >= 500) ||
+        /\b50[03]\b/.test(msg) ||
+        msg.includes('service unavailable') ||
+        msg.includes('overloaded') ||
+        msg.includes('internal server error') ||
+        msg.includes('bad gateway') ||
+        msg.includes('timed out')
+    );
+}
+
+/**
  * Options for configuring the retry orchestrator.
  */
 export interface RetryOptions {
     /** Maximum retries for server (5xx) errors before escalating. Default: 3. */
     maxRetries?: number;
-    /** Base delay in ms for exponential backoff. Actual delay: 2^attempt * base. Default: 1000. */
+    /**
+     * Base delay in ms for exponential backoff. The ceiling for attempt `n` is
+     * `2^n * base`; the actual delay is drawn uniformly from the upper half of
+     * that range (see {@link backoffDelay}). Default: 1000.
+     */
     baseDelayMs?: number;
+    /**
+     * Wall-clock budget in ms for the whole `execute()` call — every attempt,
+     * backoff, key rotation, and provider switch together. When it runs out the
+     * orchestrator throws {@link RetryBudgetExceededError} instead of starting
+     * another attempt or sleeping past it. Omit for no overall limit.
+     */
+    budgetMs?: number;
+}
+
+/**
+ * Thrown when {@link RetryOptions.budgetMs} is exhausted before any attempt succeeds.
+ */
+export class RetryBudgetExceededError extends Error {
+    constructor(budgetMs: number, lastError?: Error) {
+        super(
+            `[RetryOrchestrator] Healing budget of ${budgetMs}ms exhausted` +
+                (lastError ? ` (last error: ${lastError.message})` : '')
+        );
+        this.name = 'RetryBudgetExceededError';
+    }
+}
+
+/**
+ * Backoff delay for retry number `attempt` (1-based).
+ *
+ * "Equal jitter": half the exponential ceiling is fixed, the other half is
+ * random. Without jitter every Playwright worker that hit the same provider
+ * outage retries at exactly the same instants (2s, 4s, 8s …) and the retries
+ * arrive as a synchronised burst — the pattern most likely to be rate-limited
+ * again. Keeping a fixed floor still guarantees the backoff actually backs off.
+ */
+export function backoffDelay(attempt: number, baseDelayMs: number, random: () => number = Math.random): number {
+    const ceiling = Math.pow(2, attempt) * baseDelayMs;
+    return Math.round(ceiling / 2 + random() * (ceiling / 2));
 }
 
 /**
@@ -79,16 +137,7 @@ export class RetryOrchestrator {
         const msg = (error.message ?? '').toLowerCase();
 
         // 5xx / server / timeout → retry with backoff
-        const isServerError =
-            (error.status !== undefined && error.status >= 500) ||
-            /\b50[03]\b/.test(msg) ||
-            msg.includes('service unavailable') ||
-            msg.includes('overloaded') ||
-            msg.includes('internal server error') ||
-            msg.includes('bad gateway') ||
-            msg.includes('timed out');
-
-        if (isServerError) return 'retry';
+        if (isServerError(error)) return 'retry';
 
         // 401 / unauthorized → rotate API key
         const isAuthError = error.status === 401 || /\b401\b/.test(msg) || msg.includes('unauthorized');
@@ -107,14 +156,24 @@ export class RetryOrchestrator {
     /**
      * Execute an operation with automatic retry, key rotation, and provider failover.
      *
-     * @param operation - The async operation to attempt (typically `clientManager.makeRequest`)
+     * @param operation - The async operation to attempt (typically `clientManager.makeRequest`).
+     *   Receives the milliseconds left in the budget (`Infinity` when no
+     *   `budgetMs` is set) so it can cap its own per-request timeout to fit.
      * @param options - Retry configuration
      * @returns The successful result wrapped in an {@link OrchestratorResult}
-     * @throws The last error if all retry strategies are exhausted
+     * @throws The last error if all retry strategies are exhausted, or
+     *   {@link RetryBudgetExceededError} if `budgetMs` runs out first
      */
-    async execute<T>(operation: () => Promise<T>, options: RetryOptions = {}): Promise<OrchestratorResult<T>> {
+    async execute<T>(
+        operation: (remainingMs: number) => Promise<T>,
+        options: RetryOptions = {}
+    ): Promise<OrchestratorResult<T>> {
         const maxRetries = options.maxRetries ?? 3;
         const baseDelayMs = options.baseDelayMs ?? 1000;
+        const budgetMs = options.budgetMs;
+        const deadline = budgetMs === undefined ? Infinity : Date.now() + budgetMs;
+        const remaining = () => deadline - Date.now();
+        let lastError: Error | undefined;
 
         let hasSwitchedProvider = false;
         let maxKeyRotations = this.clientManager.getKeyCount();
@@ -129,11 +188,17 @@ export class RetryOrchestrator {
             while (retryCount <= maxRetries) {
                 logger.info(`[RetryOrchestrator] Attempt: keyIter=${keyIter}, retry=${retryCount}/${maxRetries}`);
 
+                if (remaining() <= 0) {
+                    logger.error(`[RetryOrchestrator] Budget of ${budgetMs}ms exhausted before next attempt.`);
+                    throw new RetryBudgetExceededError(budgetMs ?? 0, lastError);
+                }
+
                 try {
-                    const result = await operation();
+                    const result = await operation(remaining());
                     return { result, providerSwitched: hasSwitchedProvider };
                 } catch (err) {
                     const error = err as AIError;
+                    lastError = error;
                     const action = this.classifyError(error);
 
                     logger.error(
@@ -144,7 +209,15 @@ export class RetryOrchestrator {
                         case 'retry': {
                             if (retryCount < maxRetries) {
                                 retryCount++;
-                                const delay = Math.pow(2, retryCount) * baseDelayMs;
+                                const delay = backoffDelay(retryCount, baseDelayMs);
+                                // Sleeping past the deadline only to throw on waking
+                                // wastes the rest of the test's time budget.
+                                if (delay >= remaining()) {
+                                    logger.error(
+                                        `[RetryOrchestrator] Backoff of ${delay}ms would overrun the ${budgetMs}ms budget. Giving up.`
+                                    );
+                                    throw new RetryBudgetExceededError(budgetMs ?? 0, error);
+                                }
                                 logger.warn(
                                     `[RetryOrchestrator] Server error. Retrying in ${delay}ms (attempt ${retryCount}/${maxRetries})`
                                 );

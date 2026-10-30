@@ -12,6 +12,28 @@ on:
   workflow_dispatch:
     # Allow manual trigger from GitHub Actions UI
 
+# Least privilege. No job in this workflow writes to the repository, opens a
+# pull request, or publishes a package — they check out, install, and run tests.
+# The repo-level default is already read-only, but that setting lives in the
+# GitHub UI where no reviewer sees it, and it does not survive a fork or a
+# transfer. Stating it here makes the contract part of the diff.
+permissions:
+  contents: read
+
+# A second push to the same PR makes the first run's result irrelevant, and the
+# WebKit shard alone costs ~13 minutes on a macOS runner. Superseded pull-request
+# runs are cancelled; runs on `main` and on the nightly schedule are NOT, because
+# their healing reports are the trend baseline and a cancelled run leaves a hole
+# in it.
+#
+# Non-PR runs get a group of their own (keyed on `run_id`) rather than sharing
+# one per ref with `cancel-in-progress: false`: a concurrency group holds at most
+# one pending run, and a newer pending run cancels the older one regardless of
+# that flag — so two merges landing during the nightly would silently drop one.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: true
+
 # The dependency audit lives in its own workflow (`.github/workflows/audit.yml`)
 # so that a newly-published advisory reports as its own check rather than turning
 # this suite red for a reason unrelated to any test.

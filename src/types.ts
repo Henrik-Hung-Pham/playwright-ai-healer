@@ -13,6 +13,31 @@ export type AIProvider = 'openai' | 'gemini';
 export type SelectorStrategy = 'id' | 'css' | 'xpath' | 'text' | 'role' | 'data-testid';
 
 /**
+ * What healing is permitted to do when an interaction fails. Set via `HEALING_MODE`.
+ *
+ * - `off` — do not heal. The original Playwright error propagates untouched, no
+ *   DOM snapshot leaves the process, and no API key is required. The graceful
+ *   kill switch: previously the only way to disable healing was to unset the API
+ *   key, which makes `resolveAIProvider` throw and aborts the whole run.
+ *
+ * - `suggest` — heal, score, and record the result, but **do not apply it**. The
+ *   test still fails with its original error, and the suggested selector is
+ *   attached as a test annotation and included in the healing report. Nothing is
+ *   persisted to the locator store.
+ *
+ *   This is the mode that makes healing safe to run in CI. Under `apply`, a heal
+ *   that succeeds against a genuinely broken feature turns a real regression
+ *   green — the suite passes while the thing under test was never exercised.
+ *   `suggest` keeps the failure signal and still tells you what would have fixed
+ *   it, leaving a human to decide whether the selector drifted or the feature
+ *   broke.
+ *
+ * - `apply` — heal, apply, and persist. The historical behaviour, and still the
+ *   default so existing setups are unchanged.
+ */
+export type HealingMode = 'off' | 'suggest' | 'apply';
+
+/**
  * Structured result from an AI healing attempt
  */
 export interface HealingResult {
@@ -61,6 +86,13 @@ export interface HealingEvent {
      * then ended on a different error. Absent otherwise.
      */
     rateLimited?: boolean;
+    /**
+     * `true` when no provider returned an answer because of a provider-side
+     * outage — a 5xx, overload, or request timeout survived every retry — or
+     * because the provider's circuit breaker was already open, so no request was
+     * sent. Absent otherwise.
+     */
+    providerUnavailable?: boolean;
 }
 
 /**
@@ -199,10 +231,14 @@ export interface AIConfig {
         apiKey?: string;
     };
     healing: {
+        /** What healing is permitted to do. See {@link HealingMode}. */
+        mode: HealingMode;
         /** Maximum number of AI retry attempts per healing event. */
         maxRetries: number;
-        /** Delay in milliseconds between retry attempts. */
+        /** Base unit in milliseconds for exponential retry backoff. */
         retryDelay: number;
+        /** Wall-clock budget in milliseconds for all AI attempts within one heal. */
+        budgetMs: number;
         /** Minimum confidence score (0–1) required to accept an AI-suggested selector. */
         confidenceThreshold: number;
         /** Maximum character length of the DOM snapshot sent to the AI provider. */
@@ -259,6 +295,54 @@ export interface SelectorMetrics {
     quarantinedAt?: string;
     /** How many times a healed selector for this key has been quarantined. */
     quarantineCount?: number;
+    /**
+     * Heals applied to this key, oldest first, capped at
+     * {@link MAX_PROVENANCE_ENTRIES}.
+     *
+     * Without this the locator store is a destructive overwrite: `updateLocator`
+     * replaces a human-authored selector with a model-authored one and the
+     * original is gone. Nothing records what it was, which model proposed the
+     * replacement, or how confident the scorer was — so a bad heal cannot be
+     * reviewed after the fact and cannot be undone. This is a manual audit trail,
+     * independent of the automatic quarantine rollback above (which still governs
+     * `previousSelector` / `quarantinedSelector` and fires on
+     * `SELECTOR_QUARANTINE_THRESHOLD`).
+     */
+    history?: HealProvenance[];
+}
+
+/**
+ * How many heals are retained per key before the oldest is evicted.
+ *
+ * Deep history has no consumer — a revert only ever needs the most recent
+ * entry — while an unbounded array would grow `metrics.json` without limit
+ * across long-lived branches.
+ */
+export const MAX_PROVENANCE_ENTRIES = 10;
+
+/**
+ * A single recorded heal: what was replaced, with what, by whom, and on what evidence.
+ *
+ * This is the audit trail that makes an AI-authored selector reviewable. Every
+ * field is something a human needs in order to decide whether to keep the heal:
+ * the previous value to compare against, the model to attribute it to, and the
+ * score to judge how much the framework trusted it.
+ */
+export interface HealProvenance {
+    /** The selector that was replaced — the value `revertLocator` restores. */
+    previousSelector: string;
+    /** The selector that replaced it. */
+    healedSelector: string;
+    /** ISO 8601 timestamp of the heal. */
+    healedAt: string;
+    /** Provider that produced the replacement (`'gemini'` / `'openai'`). */
+    provider: string;
+    /** Model name that produced the replacement. */
+    model: string;
+    /** Confidence the scorer assigned (0–1). */
+    confidence: number;
+    /** Selector strategy detected in the replacement. */
+    strategy: SelectorStrategy;
 }
 
 /**

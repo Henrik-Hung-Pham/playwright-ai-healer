@@ -19,6 +19,7 @@ import type {
     HealingEvent,
     HealOperation,
     HealAllResult,
+    HealProvenance,
 } from './types.js';
 
 /**
@@ -40,6 +41,9 @@ export class AutoHealer {
     private page: Page;
     private debug: boolean;
     private healingEngine: HealingEngine;
+    /** Retained so a persisted heal can be attributed to the model that produced it. */
+    private readonly provider: AIProvider;
+    private readonly modelName: string;
 
     /**
      * Creates an AutoHealer instance
@@ -64,6 +68,8 @@ export class AutoHealer {
         this.debug = debug;
         const resolvedModel =
             modelName || (provider === 'openai' ? config.ai.openai.modelName : config.ai.gemini.modelName);
+        this.provider = provider;
+        this.modelName = resolvedModel;
         const clientManager = new AIClientManager(apiKeys, provider, resolvedModel, debug);
         this.healingEngine = new HealingEngine(clientManager);
     }
@@ -147,6 +153,23 @@ export class AutoHealer {
             // framework can record what "right" looks like.
             await this.rememberElement(locatorKey, selector);
         } catch (error) {
+            // `off` short-circuits before anything else: no failure is recorded,
+            // no DOM snapshot is taken, and no request leaves the process. The
+            // caller sees exactly the error Playwright raised, as though
+            // AutoHealer were not in the call stack at all.
+            if (config.ai.healing.mode === 'off') {
+                logger.debug(`[AutoHealer] Healing disabled (HEALING_MODE=off); propagating original error.`);
+                throw error;
+            }
+
+            if (!(await this.isBrokenSelector(selector))) {
+                logger.warn(
+                    `[AutoHealer] 🩺 ${actionName} failed on: ${selector}, but the selector still resolves to ` +
+                        `exactly one element — not a selector problem, so not healing.`
+                );
+                throw error;
+            }
+
             logger.warn(`[AutoHealer] 💥 ${actionName} failed on: ${selector}. Initiating healing protocol...`);
             if (locatorKey) {
                 const outcome = await locatorManager.recordSelectorFailure(locatorKey);
@@ -158,6 +181,17 @@ export class AutoHealer {
                 }
             }
             const result = await this.heal(selector, error as Error, locatorKey);
+
+            // `suggest` diagnoses without repairing: the heal has already been
+            // scored and recorded by HealingEngine, but the action is not retried
+            // and nothing is written to the locator store. The original error is
+            // rethrown so a genuinely broken feature still fails the test instead
+            // of being papered over by a plausible substitute element.
+            if (config.ai.healing.mode === 'suggest') {
+                this.reportSuggestion(selector, actionName, result);
+                throw error;
+            }
+
             if (result) {
                 logger.info(`[AutoHealer] 🔄 Retrying with new selector: ${result.selector}`);
 
@@ -172,15 +206,18 @@ export class AutoHealer {
                     }
 
                     await retryFn(result.selector);
+                    this.annotateHeal(selector, locatorKey, result);
 
                     // Update locator if we have a key
                     if (locatorKey) {
                         logger.info(`[AutoHealer] 💾 Updating locator key '${locatorKey}' with new value.`);
                         await locatorManager.updateLocator(locatorKey, result.selector);
-                        // `selector` is the pre-heal value. Recording it makes this heal
-                        // reversible: if the new selector turns out to point at the wrong
-                        // element, `recordSelectorFailure` can restore what it replaced.
-                        await locatorManager.recordSelectorHealed(locatorKey, selector);
+                        // `selector` is the pre-heal value, captured in the provenance record.
+                        // Recording it makes this heal reversible: if the new selector turns
+                        // out to point at the wrong element, `recordSelectorFailure` can
+                        // restore what it replaced, and `revertLocator` can walk it back
+                        // manually.
+                        await locatorManager.recordSelectorHealed(locatorKey, this.buildProvenance(selector, result));
                     }
                 } catch (retryError) {
                     logger.error(`[AutoHealer] ❌ Failed to interact with healed selector: ${String(retryError)}`);
@@ -372,6 +409,18 @@ export class AutoHealer {
                 await this.runOperation(op, selector);
                 results[i] = { selectorOrKey: op.selectorOrKey, success: true };
             } catch (err) {
+                if (config.ai.healing.mode === 'off') {
+                    // Same reasoning as executeAction: skip the isBrokenSelector DOM
+                    // check too — off means no DOM query of any kind.
+                    failures.push({ index: i, op, selector, locatorKey, error: err as Error });
+                    continue;
+                }
+                if (!(await this.isBrokenSelector(selector))) {
+                    // Same rule as executeAction: a selector that still resolves to one
+                    // element is not what failed, so there is nothing to heal.
+                    results[i] = { selectorOrKey: op.selectorOrKey, success: false, error: String(err) };
+                    continue;
+                }
                 if (locatorKey) {
                     await locatorManager.recordSelectorFailure(locatorKey);
                 }
@@ -381,12 +430,47 @@ export class AutoHealer {
 
         if (failures.length === 0) return results;
 
+        // `off`: report the failures as-is. Unlike the single-action path there is
+        // no exception to propagate — healAll reports per-operation results — so
+        // each failure is returned with its original error.
+        if (config.ai.healing.mode === 'off') {
+            logger.debug(`[AutoHealer:healAll] Healing disabled (HEALING_MODE=off); reporting failures unhealed.`);
+            for (const failure of failures) {
+                results[failure.index] = {
+                    selectorOrKey: failure.op.selectorOrKey,
+                    success: false,
+                    error: String(failure.error),
+                };
+            }
+            return results;
+        }
+
         logger.info(
             `[AutoHealer:healAll] ⚡ ${failures.length} operation(s) failed — firing AI healing in parallel...`
         );
 
         // -- Phase 2: heal all failures concurrently ----
         const healed = await Promise.allSettled(failures.map(f => this.heal(f.selector, f.error, f.locatorKey)));
+
+        // `suggest`: the heals above are scored and recorded, but no operation is
+        // retried and no selector is persisted. Each failure keeps its original
+        // error and carries the proposed selector for inspection.
+        if (config.ai.healing.mode === 'suggest') {
+            for (let j = 0; j < failures.length; j++) {
+                const failure = failures[j];
+                const healResult = healed[j];
+                if (!failure) continue;
+                const suggestion = healResult?.status === 'fulfilled' && healResult.value ? healResult.value : null;
+                this.reportSuggestion(failure.selector, failure.op.action, suggestion);
+                results[failure.index] = {
+                    selectorOrKey: failure.op.selectorOrKey,
+                    success: false,
+                    ...(suggestion ? { healedSelector: suggestion.selector } : {}),
+                    error: String(failure.error),
+                };
+            }
+            return results;
+        }
 
         // -- Phase 3: retry healed operations sequentially ----
         for (let j = 0; j < failures.length; j++) {
@@ -399,6 +483,7 @@ export class AutoHealer {
                 try {
                     await this.assertUniqueMatch(newSelector);
                     await this.runOperation(failure.op, newSelector);
+                    this.annotateHeal(failure.selector, failure.locatorKey, healResult.value);
                     results[failure.index] = {
                         selectorOrKey: failure.op.selectorOrKey,
                         success: true,
@@ -406,8 +491,12 @@ export class AutoHealer {
                     };
                     if (failure.locatorKey) {
                         await locatorManager.updateLocator(failure.locatorKey, newSelector);
-                        // `failure.selector` is the pre-heal value — the rollback target.
-                        await locatorManager.recordSelectorHealed(failure.locatorKey, failure.selector);
+                        // `failure.selector` is the pre-heal value — the rollback target,
+                        // captured in the provenance record.
+                        await locatorManager.recordSelectorHealed(
+                            failure.locatorKey,
+                            this.buildProvenance(failure.selector, healResult.value)
+                        );
                     }
                 } catch (retryErr) {
                     results[failure.index] = {
@@ -460,8 +549,68 @@ export class AutoHealer {
                 break;
             default: {
                 const _exhaustive: never = op.action;
-                throw new Error(`[AutoHealer:runOperation] Unsupported action: ${_exhaustive}`);
+                throw new Error(`[AutoHealer:runOperation] Unsupported action: ${String(_exhaustive)}`);
             }
+        }
+    }
+
+    /**
+     * Mark the running test as having passed through a heal.
+     *
+     * A healed interaction succeeds, so the test goes green and nothing in the
+     * Playwright report set it apart from a test whose selectors all worked. That
+     * difference matters: the healed step ran against a model-chosen element that
+     * no human has confirmed is the intended one. The aggregate
+     * `healing-report.json` counts heals but cannot say *which* green test relied
+     * on one. This annotation shows under the test in the HTML report, the JSON
+     * reporter, and any tooling that reads `testInfo.annotations`.
+     *
+     * @param originalSelector - The selector that failed.
+     * @param locatorKey - The store key it was resolved from, if any.
+     * @param result - The accepted heal.
+     * @private
+     */
+    private annotateHeal(originalSelector: string, locatorKey: string | null, result: HealingResult): void {
+        const target = locatorKey ? `'${locatorKey}' ` : '';
+        const description =
+            `${target}'${originalSelector}' → '${result.selector}' ` +
+            `(confidence ${result.confidence.toFixed(2)}, strategy ${result.strategy})`;
+        try {
+            test.info().annotations.push({ type: 'healed-selector', description });
+        } catch {
+            // Not running inside a Playwright test (direct API use); the heal is
+            // still logged and recorded as a HealingEvent.
+        }
+    }
+
+    /**
+     * Decide whether a failed interaction is one a different selector could fix.
+     *
+     * Healing used to start on *any* error. That included failures where the
+     * selector was fine and the element was not: a disabled button, a click
+     * intercepted by an overlay, an element that never became visible, a
+     * `waitForSelector({ state: 'hidden' })` that timed out. In each case the
+     * model was asked for a *different* element, and a plausible substitute
+     * (another button, another input) turned a real product regression into a
+     * green test.
+     *
+     * A selector is only broken if it no longer identifies exactly one element:
+     * zero matches (it drifted) or several (strict-mode violation). If it still
+     * resolves to one element, the original error is the true failure and is
+     * rethrown unchanged.
+     *
+     * An unparseable selector is broken. A closed page is not: no selector can
+     * fix it, and healing would only replace the real error with a DOM-capture one.
+     *
+     * @param selector - The selector whose interaction just failed.
+     * @private
+     */
+    private async isBrokenSelector(selector: string): Promise<boolean> {
+        if (this.page.isClosed?.()) return false;
+        try {
+            return (await this.page.locator(selector).count()) !== 1;
+        } catch {
+            return true;
         }
     }
 
@@ -492,6 +641,62 @@ export class AutoHealer {
             throw new Error(
                 `Healed selector '${selector}' is ambiguous — resolved to ${count} elements (expected exactly 1).`
             );
+        }
+    }
+
+    /**
+     * Assemble the audit record stored alongside a persisted heal.
+     *
+     * `updateLocator` is a destructive overwrite — the human-authored selector is
+     * replaced in place. This captures what it was, which model replaced it, and
+     * how confident the scorer was, so the change is reviewable afterwards and
+     * `LocatorManager.revertLocator` has something to restore.
+     *
+     * @param previousSelector - The selector being replaced.
+     * @param result - The accepted heal.
+     * @private
+     */
+    private buildProvenance(previousSelector: string, result: HealingResult): HealProvenance {
+        return {
+            previousSelector,
+            healedSelector: result.selector,
+            healedAt: new Date().toISOString(),
+            provider: this.provider,
+            model: this.modelName,
+            confidence: result.confidence,
+            strategy: result.strategy,
+        };
+    }
+
+    /**
+     * Surface a `suggest`-mode heal without applying it.
+     *
+     * Logs the suggestion and attaches it as a Playwright annotation so it shows
+     * up next to the failure in the HTML report — the point of the mode is that
+     * the diagnosis travels with the failing test rather than being buried in
+     * worker logs. The `HealingEvent` itself was already recorded by
+     * `HealingEngine`, so the healing report picks it up regardless.
+     *
+     * @param originalSelector - The selector that failed.
+     * @param actionName - The interaction that failed, for the message.
+     * @param result - The scored heal, or `null` when none was found.
+     * @private
+     */
+    private reportSuggestion(originalSelector: string, actionName: string, result: HealingResult | null): void {
+        const description = result
+            ? `[AutoHealer] HEALING_MODE=suggest — not applied. ${actionName} on '${originalSelector}' ` +
+              `would heal to '${result.selector}' (confidence=${result.confidence}, strategy=${result.strategy}). ` +
+              `Set HEALING_MODE=apply to use it.`
+            : `[AutoHealer] HEALING_MODE=suggest — no replacement selector found for '${originalSelector}'.`;
+
+        logger.warn(description);
+
+        // Annotations are only available inside a Playwright test context. A
+        // direct API consumer still gets the log line above.
+        try {
+            test.info().annotations.push({ type: 'healing-suggestion', description });
+        } catch {
+            /* not running under Playwright — the log line is the whole report */
         }
     }
 
