@@ -46,8 +46,7 @@ describe('BasePage', () => {
             // Extract the listener from the mock calls
             const onMock = mockPage.on as ReturnType<typeof vi.fn>;
             const responseCall = onMock.mock.calls.find((call: unknown[]) => call[0] === 'response') as
-                | unknown[]
-                | undefined;
+                unknown[] | undefined;
             expect(responseCall).toBeDefined();
             const listener = responseCall![1] as (response: { url: () => string; status: () => number }) => void;
 
