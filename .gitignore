@@ -9,6 +9,9 @@ build/
 out/
 *.tsbuildinfo
 
+# Generated API documentation (`npm run docs`)
+docs/
+
 # Testing
 coverage/
 test-results/

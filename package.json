@@ -28,7 +28,7 @@
         "format:check": "prettier --check \"src/**/*.ts\" \"tests/**/*.ts\" \"*.ts\" \"*.json\" \"*.md\"",
         "typecheck": "tsc --noEmit",
         "validate": "npm run typecheck && npm run lint && npm run format:check && npm run test:unit",
-        "docs": "typedoc --entryPoints src/index.ts --out docs",
+        "docs": "typedoc",
         "prepare": "git config core.hooksPath .githooks"
     },
     "keywords": [
@@ -43,6 +43,11 @@
         "node": ">=24.0.0"
     },
     "type": "module",
+    "overrides": {
+        "markdown-it": "14.3.3",
+        "vite": "8.3.3",
+        "undici": "7.30.1"
+    },
     "dependencies": {
         "@google/generative-ai": "^0.24.1",
         "better-sqlite3": "^12.6.2",
@@ -73,10 +78,5 @@
         "typescript": "^5.9.3",
         "typescript-eslint": "^8.54.0",
         "vitest": "^4.1.12"
-    },
-    "overrides": {
-        "markdown-it": "14.3.3",
-        "vite": "8.3.3",
-        "undici": "7.30.1"
     }
 }
