@@ -46,8 +46,7 @@ describe('BasePage', () => {
             // Extract the listener from the mock calls
             const onMock = mockPage.on as ReturnType<typeof vi.fn>;
             const responseCall = onMock.mock.calls.find((call: unknown[]) => call[0] === 'response') as
-                | unknown[]
-                | undefined;
+                unknown[] | undefined;
             expect(responseCall).toBeDefined();
             const listener = responseCall![1] as (response: { url: () => string; status: () => number }) => void;
 
@@ -61,7 +60,6 @@ describe('BasePage', () => {
             listener(mockResponse);
 
             // Spy on the protected skipTest method
-            // @ts-expect-error - testing protected method
             const skipSpy = vi.spyOn(basePage, 'skipTest').mockImplementation(() => {});
 
             await basePage.safeClick({ click: vi.fn() } as unknown as Locator);
