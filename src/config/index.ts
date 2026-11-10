@@ -4,7 +4,13 @@ import { logger } from '../utils/Logger.js';
 import { buildHealingPrompt } from '../ai/HealingPrompt.js';
 import type { AIProvider, HealingMode } from '../types.js';
 
-const categoriesData = {
+/**
+ * Category slugs for the demo target site (books.toscrape.com).
+ *
+ * Exported because {@link CategoryKey} is derived from it — a `keyof typeof`
+ * alias cannot be documented (or consumed) without its source object in scope.
+ */
+export const categoriesData = {
     travel: { label: 'Travel' },
     mystery: { label: 'Mystery' },
     'historical-fiction': { label: 'Historical Fiction' },
@@ -65,7 +71,7 @@ const envSchema = z.object({
     HEALING_BUDGET_MS: z.string().default('60000').transform(Number).pipe(z.number().int().min(1000)),
 });
 
-type AppConfig = {
+export type AppConfig = {
     env: string;
     app: { baseUrl: string };
     ai: {
