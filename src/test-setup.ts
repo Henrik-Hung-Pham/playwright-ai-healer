@@ -1,9 +1,33 @@
 // Test setup file for proper mock hoisting
-import { vi } from 'vitest';
+import { vi, type Mock } from 'vitest';
 
 // Create controllable mock functions
-export const mockGeminiGenerateContent = vi.fn();
-export const mockOpenaiCreate = vi.fn();
+export const mockGeminiGenerateContent: Mock = vi.fn();
+export const mockOpenaiCreate: Mock = vi.fn();
+
+// Mock winston globally so no unit test performs real file I/O via the
+// Logger's file transport. Files that need to assert on logger calls (e.g.
+// Logger.test.ts) still declare their own more detailed vi.mock('winston', ...),
+// which takes precedence for that file.
+vi.mock('winston', () => ({
+    default: {
+        createLogger: vi.fn(() => ({
+            log: vi.fn(),
+            add: vi.fn(),
+            remove: vi.fn(),
+        })),
+        transports: {
+            Console: vi.fn(),
+            File: vi.fn(),
+        },
+        format: {
+            combine: vi.fn(),
+            timestamp: vi.fn(),
+            colorize: vi.fn(),
+            printf: vi.fn(),
+        },
+    },
+}));
 
 // ---------------------------------------------------------------------------
 // Mock config/index.js — prevents Zod validation + GEMINI_API_KEY check from

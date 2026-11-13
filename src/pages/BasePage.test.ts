@@ -60,7 +60,6 @@ describe('BasePage', () => {
             listener(mockResponse);
 
             // Spy on the protected skipTest method
-            // @ts-expect-error - testing protected method
             const skipSpy = vi.spyOn(basePage, 'skipTest').mockImplementation(() => {});
 
             await basePage.safeClick({ click: vi.fn() } as unknown as Locator);
