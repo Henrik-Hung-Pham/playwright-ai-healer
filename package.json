@@ -58,7 +58,7 @@
     },
     "dependencies": {
         "@google/generative-ai": "^0.24.1",
-        "better-sqlite3": "^12.6.2",
+        "better-sqlite3": "^13.0.3",
         "dotenv": "^18.0.9",
         "openai": "^7.45.0",
         "proper-lockfile": "^4.1.2",
